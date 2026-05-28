@@ -11,6 +11,7 @@
    * dropdown -- which hits the live adapter (yfinance Search / AV SYMBOL_SEARCH)
    * so the user can explore the whole public stock universe.
    */
+  import { untrack } from 'svelte';
   import { api, apiGet } from '../lib/api';
   import { transactionsRevision } from '../lib/stores';
   import Modal from './Modal.svelte';
@@ -170,8 +171,10 @@
     }
     symbolLoading = true;
     try {
+      // Filter hits by the current asset-class tab so the ETFs sleeve gets
+      // only ETFs and the stocks sleeve only equities/funds.
       const hits = (await apiGet('/api/instruments/search', {
-        params: { query: { q } },
+        params: { query: { q, type: assetClass } },
       })) as SymbolHit[];
       symbolHits = hits ?? [];
     } catch {
@@ -180,6 +183,19 @@
       symbolLoading = false;
     }
   }
+
+  // Re-run the search when the user toggles asset class so the dropdown
+  // refreshes its hits without forcing them to retype. We only want
+  // assetClass changes to trigger this; symbolQuery is already covered by
+  // the debounce in onSymbolInput, so we untrack the read here to avoid
+  // re-firing on every keystroke.
+  $effect(() => {
+    const _ac = assetClass; // tracked dep
+    if (!open) return;
+    untrack(() => {
+      if (symbolQuery.trim().length >= 2) runSearch();
+    });
+  });
 
   function pickHit(hit: SymbolHit) {
     ticker = hit.symbol;

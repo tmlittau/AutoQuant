@@ -38,7 +38,11 @@
     }
     loading = true;
     try {
-      const hits = await apiGet('/api/instruments/search', { params: { query: { q } } });
+      // Global nav search is stocks-only by design -- ETF discovery happens
+      // inside the Add-Stock modal once the user has picked the ETFs sleeve.
+      const hits = await apiGet('/api/instruments/search', {
+        params: { query: { q, type: 'stocks' } },
+      });
       results = (hits as Hit[]) ?? [];
     } catch {
       results = [];

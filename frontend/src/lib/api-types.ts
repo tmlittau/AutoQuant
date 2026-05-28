@@ -148,6 +148,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolio/signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Signals
+         * @description BUY / HOLD / TRIM scores for every portfolio holding in ``asset_class``.
+         *
+         *     Same scoring engine as the watchlist (sub-signals: trend, momentum, MACD,
+         *     mean-reversion → composite ∈ [-1, +1] → BUY/HOLD/TRIM), but scoped to names
+         *     the user already owns. Powers the signal-map scatter on Portfolio › Stocks
+         *     so the user can see at a glance which positions are stretched (TRIM
+         *     candidates) vs. oversold (BUY-more candidates) before their next monthly
+         *     deposit. Cached 10 min keyed by (adapter, asset_class, tx revision).
+         */
+        get: operations["portfolio_app_api_get_portfolio_signals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/watchlist/signals": {
         parameters: {
             query?: never;
@@ -284,7 +311,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Groups
+         * @description List GroupConfig rows. Optional ``asset_class`` filter
+         *     (``stocks`` or ``etfs``). Each row carries ``holdings_count`` so the
+         *     Manage-Groups modal can show usage and gate destructive actions.
+         */
+        get: operations["portfolio_app_api_list_groups"];
         put?: never;
         /**
          * Upsert Group
@@ -298,6 +331,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/groups/{asset_class}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Group
+         * @description Remove a group. Refuses if any Holding still references it -- move/delete
+         *     those first. Also refuses to delete the canonical 'ETFs' group while ETF
+         *     holdings exist; ETF holdings have nowhere else to live.
+         */
+        delete: operations["portfolio_app_api_delete_group"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Group
+         * @description Update description / target_weight on an existing group.
+         *
+         *     Pass ``clear_target_weight=true`` to wipe the target back to NULL (e.g. a
+         *     sleeve you no longer want to rebalance against).
+         */
+        patch: operations["portfolio_app_api_update_group"];
+        trace?: never;
+    };
     "/api/instruments/search": {
         parameters: {
             query?: never;
@@ -309,6 +371,11 @@ export interface paths {
          * Search Instruments
          * @description Resolve a company name or partial ticker through the active adapter's
          *     symbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).
+         *
+         *     The optional ``type`` parameter filters hits to a single asset class --
+         *     ``stocks`` (equity + mutual funds) or ``etfs`` -- so the Add-Stock modal can
+         *     show only ETFs when adding to the ETFs sleeve and the global nav bar can
+         *     skip non-stock noise.
          */
         get: operations["portfolio_app_api_search_instruments"];
         put?: never;
@@ -646,10 +713,12 @@ export interface components {
             /** Cached */
             cached: boolean;
         };
-        /** WatchlistOut */
-        WatchlistOut: {
+        /** PortfolioSignalsOut */
+        PortfolioSignalsOut: {
             /** Cached */
             cached: boolean;
+            /** Asset Class */
+            asset_class: string;
             /** Items */
             items: components["schemas"]["WatchlistScoreOut"][];
         };
@@ -687,6 +756,13 @@ export interface components {
             score?: number | null;
             /** Signal */
             signal?: string | null;
+        };
+        /** WatchlistOut */
+        WatchlistOut: {
+            /** Cached */
+            cached: boolean;
+            /** Items */
+            items: components["schemas"]["WatchlistScoreOut"][];
         };
         /** TransactionOut */
         TransactionOut: {
@@ -826,6 +902,11 @@ export interface components {
             description: string;
             /** Target Weight */
             target_weight?: number | null;
+            /**
+             * Holdings Count
+             * @default 0
+             */
+            holdings_count: number;
         };
         /**
          * GroupCreate
@@ -840,6 +921,23 @@ export interface components {
             description?: string | null;
             /** Target Weight */
             target_weight?: number | null;
+        };
+        /**
+         * GroupPatch
+         * @description Body for ``PATCH /api/groups/{name}``. Both fields optional; ``None``
+         *     leaves the existing value alone, an empty string / null target_weight
+         *     clears it.
+         */
+        GroupPatch: {
+            /** Description */
+            description?: string | null;
+            /** Target Weight */
+            target_weight?: number | null;
+            /**
+             * Clear Target Weight
+             * @default false
+             */
+            clear_target_weight: boolean;
         };
         /** InstrumentSearchHit */
         InstrumentSearchHit: {
@@ -1155,6 +1253,29 @@ export interface operations {
             };
         };
     };
+    portfolio_app_api_get_portfolio_signals: {
+        parameters: {
+            query?: {
+                asset_class?: string;
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioSignalsOut"];
+                };
+            };
+        };
+    };
     portfolio_app_api_get_watchlist_signals: {
         parameters: {
             query?: {
@@ -1381,6 +1502,28 @@ export interface operations {
             };
         };
     };
+    portfolio_app_api_list_groups: {
+        parameters: {
+            query?: {
+                asset_class?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupOut"][];
+                };
+            };
+        };
+    };
     portfolio_app_api_upsert_group: {
         parameters: {
             query?: never;
@@ -1414,10 +1557,95 @@ export interface operations {
             };
         };
     };
+    portfolio_app_api_delete_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_class: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    portfolio_app_api_update_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_class: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupPatch"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     portfolio_app_api_search_instruments: {
         parameters: {
             query: {
                 q: string;
+                type?: string | null;
             };
             header?: never;
             path?: never;

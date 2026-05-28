@@ -194,6 +194,17 @@ class GroupOut(Schema):
     name: str
     description: str
     target_weight: Optional[float] = None
+    holdings_count: int = 0          # # of holdings using this group (any kind)
+
+
+class GroupPatch(Schema):
+    """Body for ``PATCH /api/groups/{name}``. Both fields optional; ``None``
+    leaves the existing value alone, an empty string / null target_weight
+    clears it."""
+
+    description: Optional[str] = None
+    target_weight: Optional[float] = None
+    clear_target_weight: bool = False     # set true to wipe target_weight to NULL
 
 
 # --------------------------------------------------------------------------- #
@@ -291,6 +302,15 @@ class WatchlistScoreOut(Schema):
 
 class WatchlistOut(Schema):
     cached: bool
+    items: list[WatchlistScoreOut]
+
+
+# --------------------------------------------------------------------------- #
+# Portfolio signals (same shape as watchlist scoring, applied to owned names).
+# --------------------------------------------------------------------------- #
+class PortfolioSignalsOut(Schema):
+    cached: bool
+    asset_class: str
     items: list[WatchlistScoreOut]
 
 

@@ -299,6 +299,55 @@
         ]
       }
     },
+    "/api/portfolio/signals": {
+      "get": {
+        "operationId": "portfolio_app_api_get_portfolio_signals",
+        "summary": "Get Portfolio Signals",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_class",
+            "schema": {
+              "default": "stocks",
+              "title": "Asset Class",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioSignalsOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "BUY / HOLD / TRIM scores for every portfolio holding in ``asset_class``.\n\nSame scoring engine as the watchlist (sub-signals: trend, momentum, MACD,\nmean-reversion \u2192 composite \u2208 [-1, +1] \u2192 BUY/HOLD/TRIM), but scoped to names\nthe user already owns. Powers the signal-map scatter on Portfolio \u203a Stocks\nso the user can see at a glance which positions are stretched (TRIM\ncandidates) vs. oversold (BUY-more candidates) before their next monthly\ndeposit. Cached 10 min keyed by (adapter, asset_class, tx revision).",
+        "tags": [
+          "portfolio"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/watchlist/signals": {
       "get": {
         "operationId": "portfolio_app_api_get_watchlist_signals",
@@ -699,6 +748,53 @@
       }
     },
     "/api/groups": {
+      "get": {
+        "operationId": "portfolio_app_api_list_groups",
+        "summary": "List Groups",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_class",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Class"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "description": "List GroupConfig rows. Optional ``asset_class`` filter\n(``stocks`` or ``etfs``). Each row carries ``holdings_count`` so the\nManage-Groups modal can show usage and gate destructive actions.",
+        "tags": [
+          "holdings"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
       "post": {
         "operationId": "portfolio_app_api_upsert_group",
         "summary": "Upsert Group",
@@ -746,6 +842,141 @@
         ]
       }
     },
+    "/api/groups/{asset_class}/{name}": {
+      "patch": {
+        "operationId": "portfolio_app_api_update_group",
+        "summary": "Update Group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_class",
+            "schema": {
+              "title": "Asset Class",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Update description / target_weight on an existing group.\n\nPass ``clear_target_weight=true`` to wipe the target back to NULL (e.g. a\nsleeve you no longer want to rebalance against).",
+        "tags": [
+          "holdings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "portfolio_app_api_delete_group",
+        "summary": "Delete Group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_class",
+            "schema": {
+              "title": "Asset Class",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Remove a group. Refuses if any Holding still references it -- move/delete\nthose first. Also refuses to delete the canonical 'ETFs' group while ETF\nholdings exist; ETF holdings have nowhere else to live.",
+        "tags": [
+          "holdings"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/instruments/search": {
       "get": {
         "operationId": "portfolio_app_api_search_instruments",
@@ -759,6 +990,22 @@
               "type": "string"
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            },
+            "required": false
           }
         ],
         "responses": {
@@ -777,7 +1024,7 @@
             }
           }
         },
-        "description": "Resolve a company name or partial ticker through the active adapter's\nsymbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).",
+        "description": "Resolve a company name or partial ticker through the active adapter's\nsymbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).\n\nThe optional ``type`` parameter filters hits to a single asset class --\n``stocks`` (equity + mutual funds) or ``etfs`` -- so the Add-Stock modal can\nshow only ETFs when adding to the ETFs sleeve and the global nav bar can\nskip non-stock noise.",
         "tags": [
           "instruments"
         ],
@@ -1740,11 +1987,15 @@
         "title": "DiversificationOut",
         "type": "object"
       },
-      "WatchlistOut": {
+      "PortfolioSignalsOut": {
         "properties": {
           "cached": {
             "title": "Cached",
             "type": "boolean"
+          },
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
           },
           "items": {
             "items": {
@@ -1756,9 +2007,10 @@
         },
         "required": [
           "cached",
+          "asset_class",
           "items"
         ],
-        "title": "WatchlistOut",
+        "title": "PortfolioSignalsOut",
         "type": "object"
       },
       "WatchlistScoreOut": {
@@ -1907,6 +2159,27 @@
           "recommendation"
         ],
         "title": "WatchlistScoreOut",
+        "type": "object"
+      },
+      "WatchlistOut": {
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchlistScoreOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cached",
+          "items"
+        ],
+        "title": "WatchlistOut",
         "type": "object"
       },
       "TransactionOut": {
@@ -2232,6 +2505,11 @@
               }
             ],
             "title": "Target Weight"
+          },
+          "holdings_count": {
+            "default": 0,
+            "title": "Holdings Count",
+            "type": "integer"
           }
         },
         "required": [
@@ -2281,6 +2559,40 @@
           "name"
         ],
         "title": "GroupCreate",
+        "type": "object"
+      },
+      "GroupPatch": {
+        "description": "Body for ``PATCH /api/groups/{name}``. Both fields optional; ``None``\nleaves the existing value alone, an empty string / null target_weight\nclears it.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "target_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Weight"
+          },
+          "clear_target_weight": {
+            "default": false,
+            "title": "Clear Target Weight",
+            "type": "boolean"
+          }
+        },
+        "title": "GroupPatch",
         "type": "object"
       },
       "InstrumentSearchHit": {

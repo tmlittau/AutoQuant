@@ -65,7 +65,24 @@
   });
 
   // Heatmap traces ----------------------------------------------------------
-  function heatmapTrace(p: Payload, scheme: string, zmin: number, zmax: number) {
+  // Distance correlation lives in [0, 1] (no negatives by construction), so a
+  // sequential blue-yellow-red ramp is more readable than the Pearson-style
+  // diverging RdBu. The 0.3 break-point is where the colorscale flips from
+  // blue (well diversified) through yellow (transition) to red (highly
+  // coupled) -- chosen by the user, who wants the boundary in a meaningful
+  // place for a typical stock portfolio.
+  const DCOR_COLORSCALE: [number, string][] = [
+    [0, '#4575b4'],
+    [0.3, '#ffffbf'],
+    [1, '#d73027'],
+  ];
+
+  function heatmapTrace(
+    p: Payload,
+    scheme: string | [number, string][],
+    zmin: number,
+    zmax: number,
+  ) {
     if (!p) return [];
     return [
       {
@@ -89,7 +106,9 @@
   }
 
   let pearsonData = $derived(pearson ? heatmapTrace(pearson, 'RdBu', -1, 1) : []);
-  let distanceData = $derived(distance ? heatmapTrace(distance, 'Reds', 0, 1) : []);
+  let distanceData = $derived(
+    distance ? heatmapTrace(distance, DCOR_COLORSCALE, 0, 1) : [],
+  );
 
   let heatmapLayout = $derived({
     height: 520,
