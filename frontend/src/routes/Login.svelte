@@ -39,7 +39,7 @@
           bind:value={username}
           autocomplete="username"
           required
-          class="w-full px-3 py-1.5 border border-slate-300 rounded-md"
+          class="w-full px-3 py-2.5 border border-slate-300 rounded-md text-base"
         />
       </label>
       <label class="block">
@@ -49,7 +49,7 @@
           bind:value={password}
           autocomplete="current-password"
           required
-          class="w-full px-3 py-1.5 border border-slate-300 rounded-md"
+          class="w-full px-3 py-2.5 border border-slate-300 rounded-md text-base"
         />
       </label>
 
@@ -62,7 +62,7 @@
       <button
         type="submit"
         disabled={submitting || !username || !password}
-        class="w-full mt-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+        class="w-full mt-2 px-3 py-3 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
       >
         {submitting ? 'Signing in…' : 'Sign in'}
       </button>

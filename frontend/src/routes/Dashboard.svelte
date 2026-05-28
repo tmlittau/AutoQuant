@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { link, push } from 'svelte-spa-router';
   import { apiGet } from '../lib/api';
+  import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import KpiCard from '../components/KpiCard.svelte';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import { fmtEUR, fmtPct } from '../lib/format';
@@ -42,11 +43,11 @@
   );
 
   let sparkLayout = $derived({
-    margin: { t: 8, r: 16, b: 32, l: 60 },
+    margin: pickMargin($isMobile, { t: 8, b: 32 }),
     yaxis: { tickprefix: '€', tickformat: ',.0f', gridcolor: '#f1f5f9' },
     xaxis: { showgrid: false },
     showlegend: false,
-    height: 240,
+    height: pickHeight($isMobile, 240, 180),
   });
 </script>
 

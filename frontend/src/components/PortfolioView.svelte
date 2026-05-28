@@ -10,6 +10,7 @@
   import { push } from 'svelte-spa-router';
   import { apiGet } from '../lib/api';
   import { transactionsRevision } from '../lib/stores';
+  import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import KpiCard from './KpiCard.svelte';
   import AddInvestmentModal from './AddInvestmentModal.svelte';
@@ -150,7 +151,10 @@
       },
     ];
   });
-  const sunburstLayout = { height: 460, margin: { t: 24, l: 0, r: 0, b: 0 } };
+  let sunburstLayout = $derived({
+    height: pickHeight($isMobile, 460, 300),
+    margin: { t: 24, l: 0, r: 0, b: 0 },
+  });
 
   // Group allocation (actual %) vs target % (only stocks have targets).
   let allocationData = $derived.by(() => {
@@ -184,9 +188,9 @@
   });
   let allocationLayout = $derived({
     barmode: 'group',
-    height: 360,
+    height: pickHeight($isMobile, 360, 260),
     yaxis: { title: { text: '% of portfolio' }, ticksuffix: '%', gridcolor: '#f1f5f9' },
-    margin: { t: 20, r: 10, b: 50, l: 60 },
+    margin: pickMargin($isMobile, { b: 50 }),
     legend: { orientation: 'h', y: -0.25 },
   });
 
@@ -214,14 +218,14 @@
       },
     ];
   });
-  const valueVsInvestedLayout = {
-    height: 360,
-    margin: { t: 20, r: 16, b: 40, l: 60 },
+  let valueVsInvestedLayout = $derived({
+    height: pickHeight($isMobile, 360, 240),
+    margin: pickMargin($isMobile, { b: 40 }),
     yaxis: { tickprefix: '€', tickformat: ',.0f', gridcolor: '#f1f5f9' },
     xaxis: { showgrid: false },
     hovermode: 'x unified' as const,
     legend: { orientation: 'h', y: -0.2 },
-  };
+  });
 
   // Stacked area by group over time.
   let stackedByGroupData = $derived.by(() => {
@@ -236,14 +240,14 @@
       hovertemplate: '<b>%{fullData.name}</b>: €%{y:,.2f}<extra></extra>',
     }));
   });
-  const stackedByGroupLayout = {
-    height: 360,
-    margin: { t: 20, r: 16, b: 40, l: 60 },
+  let stackedByGroupLayout = $derived({
+    height: pickHeight($isMobile, 360, 240),
+    margin: pickMargin($isMobile, { b: 40 }),
     yaxis: { tickprefix: '€', tickformat: ',.0f', gridcolor: '#f1f5f9' },
     xaxis: { showgrid: false },
     hovermode: 'x unified' as const,
     legend: { orientation: 'h', y: -0.2 },
-  };
+  });
 
   // P&L by holding (horizontal bar coloured by return %).
   let pnlData = $derived.by(() => {
@@ -271,8 +275,10 @@
     ];
   });
   let pnlLayout = $derived({
-    height: Math.max(280, 60 + 26 * (snap?.positions?.length ?? 0)),
-    margin: { t: 20, r: 80, b: 40, l: 80 },
+    height: Math.max($isMobile ? 220 : 280, 60 + 26 * (snap?.positions?.length ?? 0)),
+    margin: $isMobile
+      ? { t: 16, r: 40, b: 36, l: 60 }
+      : { t: 20, r: 80, b: 40, l: 80 },
     xaxis: { title: { text: 'P&L (EUR)' }, tickprefix: '€', gridcolor: '#f1f5f9' },
     yaxis: { automargin: true },
   });
@@ -322,9 +328,9 @@
     });
   });
 
-  const signalMapLayout = {
-    height: 460,
-    margin: { t: 16, r: 16, b: 50, l: 60 },
+  let signalMapLayout = $derived({
+    height: pickHeight($isMobile, 460, 320),
+    margin: pickMargin($isMobile, { b: 50 }),
     xaxis: {
       title: { text: 'trend / momentum (sub-score)' },
       zeroline: true,
@@ -358,7 +364,7 @@
         line: { color: 'rgba(148,163,184,0.5)', width: 1, dash: 'dot' },
       },
     ],
-  };
+  });
 
   // Quick lookup so the holdings table can display per-row stance badges.
   let signalByTicker = $derived<Record<string, any>>(
@@ -385,16 +391,18 @@
       (coming in Phase 6) or directly in the Django admin for now.
     </div>
   {:else if snap}
-    <!-- Action bar -->
-    <div class="flex items-center justify-end gap-3">
+    <!-- Action bar: stacks full-width on mobile, inline on desktop. -->
+    <div class="flex flex-wrap items-stretch justify-end gap-2">
       {#if refreshing}
-        <span class="text-xs text-slate-500">refreshing…</span>
+        <span class="w-full sm:w-auto text-xs text-slate-500 self-center text-right">
+          refreshing…
+        </span>
       {/if}
       {#if assetClass === 'stocks'}
         <button
           type="button"
           onclick={() => (groupsOpen = true)}
-          class="px-3 py-1.5 text-sm border border-slate-300 rounded-md hover:bg-slate-50"
+          class="w-full sm:w-auto px-4 py-2 min-h-[44px] text-sm border border-slate-300 rounded-md hover:bg-slate-50"
         >
           Manage groups
         </button>
@@ -402,21 +410,21 @@
       <button
         type="button"
         onclick={() => (addStockOpen = true)}
-        class="px-3 py-1.5 text-sm border border-slate-300 rounded-md hover:bg-slate-50"
+        class="w-full sm:w-auto px-4 py-2 min-h-[44px] text-sm border border-slate-300 rounded-md hover:bg-slate-50"
       >
         {#if assetClass === 'etfs'}+ Add ETF{:else}+ Add Stock{/if}
       </button>
       <button
         type="button"
         onclick={() => (modalOpen = true)}
-        class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        class="w-full sm:w-auto px-4 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
       >
         + Add Investment
       </button>
     </div>
 
     <!-- KPIs (skip the "Groups" card for ETFs -- they live in one flat sleeve) -->
-    <div class="grid grid-cols-2 {assetClass === 'stocks' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 {assetClass === 'stocks' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4">
       <KpiCard
         label="Value (EUR)"
         value={fmtEUR(snap.totals.value_eur)}
@@ -553,7 +561,66 @@
           <span class="text-xs text-slate-500">refreshing…</span>
         {/if}
       </div>
-      <div class="overflow-x-auto">
+      <!-- Mobile: vertical card-stack (each row as a card with label/value
+           pairs). Hidden at md+; the full table below takes over. -->
+      <ul class="md:hidden space-y-2">
+        {#each sortedPositions as p (p.ticker)}
+          <li class="border border-slate-200 rounded-lg p-3 bg-white">
+            <div class="flex items-start justify-between gap-2">
+              <button
+                type="button"
+                onclick={() => push(`/stock/${p.ticker}`)}
+                class="font-mono font-semibold text-base text-blue-600 hover:underline text-left min-h-[44px]"
+              >
+                {p.ticker}
+                <span class="block text-xs text-slate-500 font-sans font-normal truncate max-w-[60vw]">
+                  {p.name}
+                </span>
+              </button>
+              {#if assetClass === 'stocks' && signalByTicker[p.ticker]?.signal}
+                <span
+                  class="px-2 py-0.5 rounded text-xs font-medium border whitespace-nowrap {stanceBadgeClass(
+                    signalByTicker[p.ticker].signal,
+                  )}"
+                >
+                  {signalByTicker[p.ticker].signal}
+                </span>
+              {/if}
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+              <dt class="text-slate-500">Value</dt>
+              <dd class="text-right font-mono font-medium">{fmtEUR(p.value_eur)}</dd>
+              <dt class="text-slate-500">P&L</dt>
+              <dd
+                class="text-right font-mono {(p.pnl_eur ?? 0) >= 0
+                  ? 'text-emerald-600'
+                  : 'text-red-600'}"
+              >
+                {fmtEUR(p.pnl_eur)}
+              </dd>
+              <dt class="text-slate-500">Return</dt>
+              <dd
+                class="text-right font-mono {(p.return_pct ?? 0) >= 0
+                  ? 'text-emerald-600'
+                  : 'text-red-600'}"
+              >
+                {fmtPct(p.return_pct)}
+              </dd>
+              <dt class="text-slate-500">Weight</dt>
+              <dd class="text-right font-mono">{fmtPct((p.weight ?? 0) * 100, 1)}</dd>
+              <dt class="text-slate-500">Shares</dt>
+              <dd class="text-right font-mono">{fmtNum(p.shares, 4)}</dd>
+              <dt class="text-slate-500">Last price</dt>
+              <dd class="text-right font-mono text-slate-600">
+                {fmtLocal(p.price_local, p.currency)}
+              </dd>
+            </dl>
+          </li>
+        {/each}
+      </ul>
+
+      <!-- Desktop: full table (hidden at <md). -->
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
             <tr

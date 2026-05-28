@@ -10,6 +10,7 @@
    */
   import { apiGet } from '../lib/api';
   import { transactionsRevision } from '../lib/stores';
+  import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import { fmtNum } from '../lib/format';
 
@@ -111,8 +112,10 @@
   );
 
   let heatmapLayout = $derived({
-    height: 520,
-    margin: { t: 20, r: 16, b: 80, l: 80 },
+    height: pickHeight($isMobile, 520, 340),
+    margin: $isMobile
+      ? { t: 16, r: 8, b: 60, l: 60 }
+      : { t: 20, r: 16, b: 80, l: 80 },
     xaxis: { side: 'bottom', tickangle: -45, automargin: true },
     yaxis: { autorange: 'reversed' as const, automargin: true },
   });
@@ -149,7 +152,7 @@
         {/each}
       </div>
     </div>
-    <div class="flex-1 min-w-[18rem]">
+    <div class="flex-1 min-w-0 sm:min-w-[18rem] w-full">
       <span class="block text-xs font-medium text-slate-600 mb-1">
         Lookback: {lookback} trading days (≈ {(lookback / 21).toFixed(1)} months)
       </span>

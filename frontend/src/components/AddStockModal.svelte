@@ -392,7 +392,7 @@
 <Modal {open} {onClose} title="Add Stock" sizeClass="max-w-2xl">
   <div class="space-y-5 text-sm">
     <!-- Kind + asset class toggles -->
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
         <span class="block text-xs font-medium text-slate-700 mb-1">Add to</span>
         <div class="inline-flex rounded-md border border-slate-200 p-0.5 bg-slate-50">
@@ -400,7 +400,7 @@
             <button
               type="button"
               onclick={() => (kind = k as Kind)}
-              class="px-3 py-1 rounded text-sm capitalize transition {kind === k
+              class="px-3 py-2 min-h-[40px] rounded text-sm capitalize transition {kind === k
                 ? 'bg-white shadow-sm text-slate-900 font-medium'
                 : 'text-slate-600 hover:text-slate-900'}"
             >{k}</button>
@@ -414,7 +414,7 @@
             <button
               type="button"
               onclick={() => (assetClass = a as AssetClass)}
-              class="px-3 py-1 rounded text-sm uppercase transition {assetClass === a
+              class="px-3 py-2 min-h-[40px] rounded text-sm uppercase transition {assetClass === a
                 ? 'bg-white shadow-sm text-slate-900 font-medium'
                 : 'text-slate-600 hover:text-slate-900'}"
             >{a}</button>
@@ -435,7 +435,7 @@
         onfocus={() => (showHits = true)}
         onblur={() => setTimeout(() => (showHits = false), 150)}
         placeholder="e.g. ASML, Berkshire, WEBN.DE …"
-        class="w-full px-3 py-1.5 border border-slate-300 rounded-md font-mono"
+        class="w-full px-3 py-2 sm:py-1.5 border border-slate-300 rounded-md font-mono text-base sm:text-sm"
       />
       {#if showHits && (symbolLoading || symbolHits.length > 0)}
         <div
@@ -495,19 +495,19 @@
           <div class="text-xs text-slate-500 mb-1">
             → <span class="font-mono font-medium text-slate-700">{ticker}</span>
           </div>
-          <div class="grid grid-cols-[1fr_6rem] gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-[1fr_6rem] gap-2">
             <input
               type="text"
               bind:value={name}
               placeholder="Display name"
-              class="px-2 py-1 border border-slate-300 rounded text-sm bg-white"
+              class="px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm bg-white"
             />
             <input
               type="text"
               bind:value={currency}
               placeholder="CCY"
               maxlength="6"
-              class="px-2 py-1 border border-slate-300 rounded text-sm font-mono bg-white uppercase"
+              class="px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm font-mono bg-white uppercase"
             />
           </div>
         </div>
@@ -522,7 +522,7 @@
           <div class="flex gap-2 items-center">
             <select
               bind:value={group}
-              class="flex-1 px-3 py-1.5 border border-slate-300 rounded-md bg-white"
+              class="flex-1 px-3 py-2 sm:py-1.5 border border-slate-300 rounded-md bg-white text-base sm:text-sm"
             >
               {#each availableGroups as g}
                 <option value={g}>{g}</option>
@@ -537,7 +537,7 @@
                 creatingNewGroup = true;
                 newGroupName = '';
               }}
-              class="text-blue-600 hover:underline text-sm whitespace-nowrap"
+              class="text-blue-600 hover:underline text-sm whitespace-nowrap min-h-[44px] px-2"
             >+ New group</button>
           </div>
         {:else}
@@ -550,28 +550,29 @@
                 class="text-xs text-slate-500 hover:underline"
               >use existing instead</button>
             </div>
-            <div class="grid grid-cols-2 gap-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input
                 type="text"
                 bind:value={newGroupName}
                 placeholder="Group name (e.g. Energy)"
-                class="px-2 py-1 border border-slate-300 rounded text-sm"
+                class="px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm"
               />
               <input
                 type="number"
+                inputmode="decimal"
                 bind:value={newGroupTargetPct}
                 placeholder="Target weight (%)"
                 min="0"
                 max="100"
                 step="0.1"
-                class="px-2 py-1 border border-slate-300 rounded text-sm font-mono"
+                class="px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm font-mono"
               />
             </div>
             <input
               type="text"
               bind:value={newGroupDescription}
               placeholder="Description (optional)"
-              class="w-full px-2 py-1 border border-slate-300 rounded text-sm"
+              class="w-full px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm"
             />
           </div>
         {/if}
@@ -591,14 +592,14 @@
           <span class="text-sm font-medium text-slate-700">Log initial buy now</span>
         </label>
         {#if withInitialBuy}
-          <div class="space-y-3 ml-5 border-l-2 border-slate-200 pl-4">
-            <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-3 ml-0 sm:ml-5 border-l-0 sm:border-l-2 border-slate-200 pl-0 sm:pl-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label class="block">
                 <span class="block text-xs font-medium text-slate-700 mb-0.5">Date</span>
                 <input
                   type="date"
                   bind:value={initialDate}
-                  class="w-full px-2 py-1 border border-slate-300 rounded text-sm"
+                  class="w-full px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm"
                 />
               </label>
               <label class="block">
@@ -607,24 +608,26 @@
                 </span>
                 <input
                   type="number"
+                  inputmode="decimal"
                   bind:value={initialAmount}
                   min="0.01"
                   step="0.01"
-                  class="w-full px-2 py-1 border border-slate-300 rounded text-sm font-mono"
+                  class="w-full px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm font-mono"
                 />
               </label>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label class="block">
                 <span class="block text-xs font-medium text-slate-700 mb-0.5">
                   Fee (EUR, optional)
                 </span>
                 <input
                   type="number"
+                  inputmode="decimal"
                   bind:value={initialFee}
                   min="0"
                   step="0.01"
-                  class="w-full px-2 py-1 border border-slate-300 rounded text-sm font-mono"
+                  class="w-full px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm font-mono"
                 />
               </label>
               <label class="block">
@@ -634,7 +637,7 @@
                 <input
                   type="text"
                   bind:value={initialNote}
-                  class="w-full px-2 py-1 border border-slate-300 rounded text-sm"
+                  class="w-full px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm"
                 />
               </label>
             </div>
@@ -671,13 +674,13 @@
     <button
       type="button"
       onclick={onClose}
-      class="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900"
+      class="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 rounded-md"
     >Cancel</button>
     <button
       type="button"
       onclick={submit}
       disabled={!canSubmit}
-      class="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+      class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
     >
       {submitting ? 'Adding…' : `Add to ${kind}`}
     </button>

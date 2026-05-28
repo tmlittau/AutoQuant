@@ -141,14 +141,14 @@
         href="/api/transactions/export"
         target="_blank"
         rel="noopener"
-        class="px-3 py-1.5 text-sm border border-slate-300 rounded-md hover:bg-slate-50"
+        class="inline-flex items-center px-4 py-2 min-h-[44px] text-sm border border-slate-300 rounded-md hover:bg-slate-50"
       >
         Export CSV
       </a>
       <button
         type="button"
         onclick={() => (modalOpen = true)}
-        class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        class="px-4 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
       >
         + Add Investment
       </button>
@@ -185,12 +185,12 @@
     <button
       type="button"
       onclick={load}
-      class="ml-auto px-3 py-1 bg-slate-900 text-white rounded hover:bg-slate-700"
+      class="ml-auto px-4 py-2 min-h-[40px] bg-slate-900 text-white rounded hover:bg-slate-700"
     >Apply</button>
     <button
       type="button"
       onclick={clearFilters}
-      class="px-3 py-1 text-slate-600 hover:text-slate-900"
+      class="px-4 py-2 min-h-[40px] text-slate-600 hover:text-slate-900"
     >Clear</button>
   </section>
 
@@ -201,8 +201,102 @@
       {error}
     </div>
   {:else}
+    <!-- Mobile: card-stack list of transactions. -->
+    <ul class="md:hidden space-y-2">
+      {#each rows as r (r.id)}
+        <li class="border border-slate-200 rounded-lg p-3 bg-white">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span
+                  class="px-2 py-0.5 rounded text-xs font-medium {r.action === 'buy'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-red-100 text-red-700'}"
+                >
+                  {r.action}
+                </span>
+                <span class="font-mono font-semibold">{r.ticker}</span>
+              </div>
+              <div class="text-xs text-slate-500 mt-0.5">
+                {fmtDate(r.date)} · {r.group}
+              </div>
+            </div>
+            <div class="text-right font-mono shrink-0">
+              <div class="text-base font-semibold">{fmtEUR(r.amount_eur)}</div>
+            </div>
+          </div>
+          <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <dt class="text-slate-500">Shares</dt>
+            <dd class="text-right font-mono">{fmtNum(r.shares, 4)}</dd>
+            <dt class="text-slate-500">Price (local)</dt>
+            <dd class="text-right font-mono text-slate-600">
+              {fmtLocal(r.price_local, r.listing_currency)}
+            </dd>
+            <dt class="text-slate-500">EUR / {r.listing_currency}</dt>
+            <dd class="text-right font-mono text-slate-500">{r.eur_per_local.toFixed(4)}</dd>
+            <dt class="text-slate-500">Fee</dt>
+            <dd class="text-right font-mono">
+              {#if editingId === r.id}
+                <input
+                  type="number"
+                  step="0.01"
+                  bind:value={editFee}
+                  class="w-24 px-2 py-1 border border-slate-300 rounded text-right text-sm"
+                />
+              {:else}
+                {fmtEUR(r.fee_eur)}
+              {/if}
+            </dd>
+          </dl>
+          {#if editingId === r.id}
+            <label class="block mt-3 text-xs">
+              <span class="block text-slate-500 mb-1">Note</span>
+              <input
+                type="text"
+                bind:value={editNote}
+                class="w-full px-3 py-2 border border-slate-300 rounded text-base"
+              />
+            </label>
+          {:else if r.note}
+            <div class="mt-3 text-xs text-slate-600 break-words">
+              <span class="text-slate-500">Note:</span> {r.note}
+            </div>
+          {/if}
+          <div class="mt-3 flex gap-2">
+            {#if editingId === r.id}
+              <button
+                type="button"
+                onclick={() => saveEdit(r.id)}
+                class="flex-1 px-3 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >Save</button>
+              <button
+                type="button"
+                onclick={cancelEdit}
+                class="flex-1 px-3 py-2 min-h-[44px] text-sm border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50"
+              >Cancel</button>
+            {:else}
+              <button
+                type="button"
+                onclick={() => startEdit(r)}
+                class="flex-1 px-3 py-2 min-h-[44px] text-sm border border-slate-300 text-blue-600 rounded-md hover:bg-blue-50"
+              >Edit</button>
+              <button
+                type="button"
+                onclick={() => deleteRow(r)}
+                class="flex-1 px-3 py-2 min-h-[44px] text-sm border border-red-200 text-red-600 rounded-md hover:bg-red-50"
+              >Delete</button>
+            {/if}
+          </div>
+        </li>
+      {/each}
+      {#if rows.length === 0}
+        <li class="py-8 text-center text-sm text-slate-500">No transactions matched.</li>
+      {/if}
+    </ul>
+
+    <!-- Desktop: full table. -->
     <section
-      class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto"
+      class="hidden md:block bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto"
     >
       <table class="w-full text-sm">
         <thead>

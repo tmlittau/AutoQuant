@@ -81,9 +81,10 @@
   }
 </script>
 
-<div class="relative w-full max-w-md">
+<div class="relative w-full md:max-w-md">
   <input
     type="text"
+    inputmode="search"
     placeholder="Search any stock (e.g. ASML, Berkshire) …"
     value={query}
     oninput={onInput}
@@ -92,20 +93,20 @@
       open = true;
     }}
     onblur={onBlur}
-    class="w-full px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400"
+    class="w-full px-3 py-2 md:py-1.5 rounded-md border border-slate-300 bg-white text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400"
   />
   {#if open && (loading || results.length > 0)}
     <div
       class="absolute mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-72 overflow-y-auto z-50"
     >
       {#if loading}
-        <div class="px-3 py-2 text-xs text-slate-500">Searching…</div>
+        <div class="px-3 py-3 text-xs text-slate-500">Searching…</div>
       {/if}
       {#each results as r (r.symbol)}
         <button
           type="button"
           onmousedown={() => pick(r.symbol)}
-          class="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+          class="w-full text-left px-3 py-3 md:py-2 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 min-h-[44px]"
         >
           <div class="text-sm font-medium text-slate-900">{r.symbol}</div>
           <div class="text-xs text-slate-500">

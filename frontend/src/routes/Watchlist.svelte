@@ -10,6 +10,7 @@
   import { onMount } from 'svelte';
   import { api, apiGet } from '../lib/api';
   import { transactionsRevision } from '../lib/stores';
+  import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import AddStockModal from '../components/AddStockModal.svelte';
   import { fmtNum, fmtPct, fmtLocal } from '../lib/format';
@@ -102,8 +103,8 @@
   });
 
   let signalMapLayout = $derived.by(() => ({
-    height: 460,
-    margin: { t: 16, r: 16, b: 50, l: 60 },
+    height: pickHeight($isMobile, 460, 320),
+    margin: pickMargin($isMobile, { b: 50 }),
     xaxis: {
       title: { text: 'trend / momentum (sub-score)' },
       zeroline: true,
@@ -175,12 +176,12 @@
       <button
         type="button"
         onclick={() => load(true)}
-        class="px-3 py-1.5 text-sm border border-slate-300 rounded-md hover:bg-slate-50"
+        class="px-4 py-2 min-h-[44px] text-sm border border-slate-300 rounded-md hover:bg-slate-50"
       >Refresh</button>
       <button
         type="button"
         onclick={() => (modalOpen = true)}
-        class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        class="px-4 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
       >+ Add to Watchlist</button>
     </div>
   </header>
@@ -202,9 +203,74 @@
       </section>
     {/if}
 
-    <!-- Scoreboard -->
+    <!-- Mobile: vertical card stack. The whole card is a button so taps
+         anywhere on a row navigate to the single-stock view. -->
+    <ul class="md:hidden space-y-2">
+      {#each sortedItems as i (i.ticker)}
+        <li>
+          <button
+            type="button"
+            onclick={() => push(`/stock/${encodeURIComponent(i.ticker)}`)}
+            class="w-full text-left border border-slate-200 rounded-lg p-3 bg-white hover:bg-slate-50 active:bg-slate-100"
+          >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="font-mono font-semibold text-base text-blue-600">{i.ticker}</div>
+              <div class="text-xs text-slate-500 truncate">{i.name}</div>
+              <div class="text-xs text-slate-400 truncate">{i.group}</div>
+            </div>
+            <div class="flex flex-col items-end gap-1 shrink-0">
+              <span
+                class="px-2 py-0.5 rounded text-xs font-medium border whitespace-nowrap {recoBadge(i.recommendation)}"
+              >
+                {i.recommendation}
+              </span>
+              <span
+                class="px-2 py-0.5 rounded text-xs font-mono {statusBadge(i.status)}"
+              >
+                {i.status}
+              </span>
+            </div>
+          </div>
+          <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <dt class="text-slate-500">Score</dt>
+            <dd class="text-right font-mono font-semibold">{fmtNum(i.score, 2)}</dd>
+            <dt class="text-slate-500">Price</dt>
+            <dd class="text-right font-mono">{fmtLocal(i.last_price, i.currency)}</dd>
+            <dt class="text-slate-500">RSI</dt>
+            <dd class="text-right font-mono">{fmtNum(i.rsi_14, 1)}</dd>
+            <dt class="text-slate-500">z20</dt>
+            <dd
+              class="text-right font-mono {(i.zscore_20 ?? 0) >= 2
+                ? 'text-red-600'
+                : (i.zscore_20 ?? 0) <= -2
+                  ? 'text-emerald-600'
+                  : ''}"
+            >
+              {fmtNum(i.zscore_20, 2)}
+            </dd>
+            <dt class="text-slate-500">ROC 20d</dt>
+            <dd
+              class="text-right font-mono {(i.roc_20d_pct ?? 0) >= 0
+                ? 'text-emerald-600'
+                : 'text-red-600'}"
+            >
+              {fmtPct(i.roc_20d_pct, 1)}
+            </dd>
+          </dl>
+          </button>
+        </li>
+      {/each}
+      {#if items.length === 0}
+        <li class="py-8 text-center text-sm text-slate-500">
+          Watchlist is empty. Click "+ Add to Watchlist" to add a candidate.
+        </li>
+      {/if}
+    </ul>
+
+    <!-- Desktop: full scoreboard table. -->
     <section
-      class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto"
+      class="hidden md:block bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto"
     >
       <table class="w-full text-sm">
         <thead>

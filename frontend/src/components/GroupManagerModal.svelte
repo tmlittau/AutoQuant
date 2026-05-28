@@ -265,7 +265,7 @@
                     type="button"
                     onclick={() => saveRow(g)}
                     disabled={savingKey === g.name || !rowChanged(g)}
-                    class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
+                    class="px-3 py-2 min-h-[36px] text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
                   >
                     {savingKey === g.name ? 'Saving…' : 'Save'}
                   </button>
@@ -276,7 +276,7 @@
                     title={g.holdings_count > 0
                       ? 'Reassign or delete this group\'s holdings first.'
                       : 'Delete group'}
-                    class="ml-1 px-2 py-1 text-xs border border-red-200 text-red-600 rounded hover:bg-red-50 disabled:text-slate-300 disabled:border-slate-200 disabled:cursor-not-allowed"
+                    class="ml-1 px-3 py-2 min-h-[36px] text-xs border border-red-200 text-red-600 rounded hover:bg-red-50 disabled:text-slate-300 disabled:border-slate-200 disabled:cursor-not-allowed"
                   >
                     Delete
                   </button>
@@ -331,23 +331,24 @@
             type="text"
             bind:value={newName}
             placeholder="Name (e.g. Energy)"
-            class="px-2 py-1 border border-slate-300 rounded text-sm"
+            class="px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm"
           />
           <input
             type="text"
             bind:value={newDescription}
             placeholder="Description (optional)"
-            class="px-2 py-1 border border-slate-300 rounded text-sm"
+            class="px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm"
           />
           {#if assetClass === 'stocks'}
             <input
               type="number"
+              inputmode="decimal"
               bind:value={newTargetPct}
               placeholder="Target %"
               min="0"
               max="100"
               step="0.1"
-              class="px-2 py-1 border border-slate-300 rounded text-sm font-mono text-right"
+              class="px-3 py-2 sm:py-1 border border-slate-300 rounded text-base sm:text-sm font-mono text-right"
             />
           {:else}
             <span></span>
@@ -356,7 +357,7 @@
             type="button"
             onclick={createGroup}
             disabled={creating || !newName.trim()}
-            class="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+            class="px-4 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
           >
             {creating ? 'Adding…' : 'Add'}
           </button>
@@ -369,7 +370,7 @@
     <button
       type="button"
       onclick={onClose}
-      class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200"
+      class="px-4 py-2 text-sm bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200"
     >Done</button>
   {/snippet}
 </Modal>

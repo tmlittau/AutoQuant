@@ -9,6 +9,7 @@
    * quant signal breakdown card (composite + sub-signals + BUY/HOLD/TRIM).
    */
   import { apiGet } from '../lib/api';
+  import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import AddStockModal from '../components/AddStockModal.svelte';
   import { fmtPct, fmtNum, fmtDate, fmtLocal } from '../lib/format';
@@ -227,15 +228,15 @@
       },
     ];
   });
-  const drawdownLayout = {
-    height: 180,
-    margin: { t: 16, r: 16, b: 30, l: 60 },
+  let drawdownLayout = $derived({
+    height: pickHeight($isMobile, 180, 140),
+    margin: pickMargin($isMobile, { b: 30 }),
     yaxis: { title: { text: 'drawdown %' }, gridcolor: '#f1f5f9', ticksuffix: '%' },
     xaxis: { showgrid: false },
-  };
+  });
   let priceChartLayout = $derived({
-    height: 360,
-    margin: { t: 16, r: 16, b: 36, l: 60 },
+    height: pickHeight($isMobile, 360, 260),
+    margin: pickMargin($isMobile, { b: 36 }),
     yaxis: {
       title: { text: 'price (' + (searchHit?.currency ?? '') + ')' },
       gridcolor: '#f1f5f9',
@@ -260,8 +261,8 @@
     ];
   });
   let rsiChartLayout = $derived({
-    height: 200,
-    margin: { t: 16, r: 16, b: 30, l: 60 },
+    height: pickHeight($isMobile, 200, 160),
+    margin: pickMargin($isMobile, { b: 30 }),
     yaxis: { range: [0, 100], title: { text: 'RSI' }, gridcolor: '#f1f5f9' },
     xaxis: { showgrid: false },
     shapes: [
@@ -320,8 +321,8 @@
     ];
   });
   let macdChartLayout = $derived({
-    height: 220,
-    margin: { t: 16, r: 16, b: 30, l: 60 },
+    height: pickHeight($isMobile, 220, 180),
+    margin: pickMargin($isMobile, { b: 30 }),
     yaxis: { gridcolor: '#f1f5f9' },
     xaxis: { showgrid: false },
     legend: { orientation: 'h', y: -0.22 },
@@ -374,16 +375,16 @@
         </div>
       </div>
     {/if}
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-2 w-full sm:w-auto">
       <button
         type="button"
         onclick={() => openAdd('portfolio')}
-        class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        class="px-4 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
       >+ Add to Portfolio</button>
       <button
         type="button"
         onclick={() => openAdd('watchlist')}
-        class="px-3 py-1.5 text-sm border border-slate-300 rounded-md hover:bg-slate-50"
+        class="px-4 py-2 min-h-[44px] text-sm border border-slate-300 rounded-md hover:bg-slate-50"
       >+ Add to Watchlist</button>
     </div>
   </header>
@@ -414,7 +415,7 @@
     <!-- Score breakdown card -->
     {#if score}
       <section
-        class="bg-white border border-slate-200 rounded-xl shadow-sm p-4 grid grid-cols-2 md:grid-cols-6 gap-4 text-sm"
+        class="bg-white border border-slate-200 rounded-xl shadow-sm p-4 grid grid-cols-3 md:grid-cols-6 gap-4 text-sm"
       >
         <div class="flex flex-col">
           <span class="text-xs uppercase text-slate-500 tracking-wide">Signal</span>

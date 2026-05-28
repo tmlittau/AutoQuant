@@ -143,7 +143,7 @@
         <span class="block text-xs font-medium text-slate-700 mb-1">Holding</span>
         <select
           bind:value={ticker}
-          class="w-full px-3 py-1.5 border border-slate-300 rounded-md bg-white"
+          class="w-full px-3 py-2 sm:py-1.5 border border-slate-300 rounded-md bg-white text-base sm:text-sm"
         >
           {#each holdings as h (h.ticker)}
             <option value={h.ticker}>
@@ -153,36 +153,38 @@
         </select>
       </label>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label class="block">
           <span class="block text-xs font-medium text-slate-700 mb-1">Date</span>
           <input
             type="date"
             bind:value={date}
-            class="w-full px-3 py-1.5 border border-slate-300 rounded-md"
+            class="w-full px-3 py-2 sm:py-1.5 border border-slate-300 rounded-md text-base sm:text-sm"
           />
         </label>
         <label class="block">
           <span class="block text-xs font-medium text-slate-700 mb-1">Amount (EUR)</span>
           <input
             type="number"
+            inputmode="decimal"
             min="0.01"
             step="0.01"
             bind:value={amount}
-            class="w-full px-3 py-1.5 border border-slate-300 rounded-md font-mono"
+            class="w-full px-3 py-2 sm:py-1.5 border border-slate-300 rounded-md font-mono text-base sm:text-sm"
           />
         </label>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label class="block">
           <span class="block text-xs font-medium text-slate-700 mb-1">Fee (EUR, optional)</span>
           <input
             type="number"
+            inputmode="decimal"
             min="0"
             step="0.01"
             bind:value={fee}
-            class="w-full px-3 py-1.5 border border-slate-300 rounded-md font-mono"
+            class="w-full px-3 py-2 sm:py-1.5 border border-slate-300 rounded-md font-mono text-base sm:text-sm"
           />
         </label>
         <label class="block">
@@ -191,7 +193,7 @@
             type="text"
             bind:value={note}
             placeholder="e.g. monthly contribution"
-            class="w-full px-3 py-1.5 border border-slate-300 rounded-md"
+            class="w-full px-3 py-2 sm:py-1.5 border border-slate-300 rounded-md text-base sm:text-sm"
           />
         </label>
       </div>
@@ -234,13 +236,13 @@
     <button
       type="button"
       onclick={onClose}
-      class="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900"
+      class="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 rounded-md"
     >Cancel</button>
     <button
       type="button"
       onclick={submit}
       disabled={!canSubmit}
-      class="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+      class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
     >
       {submitting ? 'Logging…' : 'Log buy'}
     </button>
