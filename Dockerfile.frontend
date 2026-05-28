@@ -1,0 +1,27 @@
+# --------------------------------------------------------------------------- #
+# AutoQuant frontend image
+#
+# Stage 1 builds the Svelte SPA bundle with Vite. Stage 2 is a slim nginx that
+# serves the bundle on port 80 (mapped to the host's port 3000 in
+# docker-compose) and reverse-proxies /api, /admin, /static to the backend
+# container on the compose network. The backend is never reachable from the
+# host -- only through this nginx proxy.
+# --------------------------------------------------------------------------- #
+
+# --- Stage 1: build SPA ---
+FROM node:20-alpine AS build
+WORKDIR /app
+
+# Cache npm deps -- only re-install when package*.json change.
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --legacy-peer-deps
+
+# Then copy the rest and build.
+COPY frontend/ ./
+RUN npm run build
+
+# --- Stage 2: nginx ---
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

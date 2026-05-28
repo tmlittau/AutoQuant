@@ -1,0 +1,31 @@
+# Personal / sensitive data -- never commit.
+.env
+.env.local
+portfolio.yaml
+watchlist.yaml
+data/
+.data_backup/
+
+# Local DB (lives in a docker volume in prod, in backend/ in dev).
+backend/db.sqlite3
+backend/staticfiles/
+
+# Local virtualenv + adapter cache.
+.venv/
+.cache/
+
+# Python build / test artefacts.
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Frontend artefacts.
+frontend/node_modules/
+frontend/dist/
+
+# Editor / OS noise.
+.DS_Store
+.vscode/
+.idea/
+*.swp

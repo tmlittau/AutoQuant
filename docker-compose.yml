@@ -1,0 +1,69 @@
+# docker-compose for the AutoQuant webapp.
+#
+# Two services, one named network:
+#   * backend  -- Django + Gunicorn. Exposed ONLY on the compose network
+#                 (port 8000 internal). NOT bound to the host.
+#   * frontend -- nginx serving the Svelte SPA + reverse-proxying /api, /admin,
+#                 /static to the backend container. Bound to host port 3000
+#                 (override with AUTOQUANT_HOST_PORT). Cloudflare Tunnel
+#                 should point at <truenas-lan-ip>:3000.
+#
+# All configuration comes from the .env file next to this docker-compose.yml.
+# See .env.example for the full template. Required keys (no defaults --
+# `docker compose up` will refuse to start without them):
+#   DJANGO_SECRET_KEY
+#   DJANGO_ALLOWED_HOSTS
+#   DJANGO_CSRF_TRUSTED_ORIGINS
+# Optional keys:
+#   AUTOQUANT_HOST_PORT          -- default 3000
+#   AV_API_KEY                   -- Alpha Vantage key (or enter via Settings UI)
+#
+# First-time setup:
+#   1. cp .env.example .env  &&  edit
+#   2. docker compose build
+#   3. docker compose up -d
+#   4. docker compose exec backend python backend/manage.py createsuperuser
+#   5. log in via the SPA and add holdings, OR import legacy YAML/CSV (see README)
+#   6. point Cloudflare Tunnel at http://<truenas-lan-ip>:3000
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: autoquant-backend
+    expose:
+      - "8000"        # internal only -- NOT in `ports:` so the host can't reach it
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY:           ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY is required (set in .env)}
+      DJANGO_ALLOWED_HOSTS:        ${DJANGO_ALLOWED_HOSTS:?DJANGO_ALLOWED_HOSTS is required (set in .env)}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:?DJANGO_CSRF_TRUSTED_ORIGINS is required (set in .env)}
+      DJANGO_DB_PATH:              /data/db.sqlite3
+      AV_API_KEY:                  ${AV_API_KEY:-}
+    volumes:
+      - autoquant_db:/data
+      - autoquant_cache:/app/.cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/auth/me', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: autoquant-frontend
+    ports:
+      - "${AUTOQUANT_HOST_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  autoquant_db:
+  autoquant_cache:

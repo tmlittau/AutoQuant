@@ -1,0 +1,35 @@
+# Anything that would bloat the build context or leak local state.
+
+# Local venv / caches.
+.venv/
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Frontend artefacts -- the Dockerfile.frontend rebuilds them.
+frontend/node_modules/
+frontend/dist/
+
+# Persistent local data -- the container uses a docker volume, not the host's
+# checkout, so don't ship the dev DB.
+backend/db.sqlite3
+backend/staticfiles/
+
+# Notebooks aren't needed at runtime.
+notebooks/
+
+# Editor / OS noise.
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Git internals.
+.git/
+.github/
+
+# Plan + env files -- don't ship secrets.
+.env
+.env.local

@@ -1,0 +1,23 @@
+# Direct dependencies for AutoQuant (already present in .venv).
+# The API key is read from a .env file (AV_API_KEY=...), so no dotenv lib needed.
+requests>=2.32
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.8
+seaborn>=0.13
+PyYAML>=6.0          # portfolio.yaml config
+
+# Market-data adapters (choose either at runtime via aq.get_adapter)
+yfinance>=0.2        # default adapter, no API key / request cap
+# alphavantage: no package needed (uses requests + your .env key)
+
+# Webapp backend (Django + django-ninja serves the SPA + API in prod)
+django>=5.1
+django-ninja>=1.6
+whitenoise>=6.7      # serves the built SPA from Django in prod
+gunicorn>=23.0       # production WSGI server (skip if you only run `manage.py runserver`)
+
+# Notebook / demo (kept for the original notebooks; not required by the webapp)
+jupyter>=1.0
+ipywidgets>=8.1
+plotly>=6.0          # interactive notebook charts

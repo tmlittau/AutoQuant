@@ -1,0 +1,48 @@
+# --------------------------------------------------------------------------- #
+# AutoQuant backend image
+#
+# Python 3.13 + Django + Gunicorn + autoquant library. SQLite DB and the
+# Alpha Vantage on-disk cache live in mounted volumes so they survive container
+# restarts. The container exposes only port 8000 to the compose network -- it's
+# never bound to the host port; the frontend container reverse-proxies to it.
+# --------------------------------------------------------------------------- #
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Minimal system deps -- pandas/numpy/yfinance all come as wheels.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python deps first (cached layer until requirements.txt changes).
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# Application code. The legacy YAML / CSV seed files are NOT baked into the
+# image -- they contain personal data and are gitignored. The DB starts empty;
+# you populate it either via the SPA UI or by `docker compose cp`-ing your own
+# portfolio.yaml + watchlist.yaml + data/transactions.csv into the running
+# container and then `docker compose exec backend python backend/manage.py
+# import_legacy` (see README for details).
+COPY autoquant/ ./autoquant/
+COPY backend/   ./backend/
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Persistent state lives here (mount a docker volume on /data).
+RUN mkdir -p /data /app/.cache/alphavantage
+ENV DJANGO_DB_PATH=/data/db.sqlite3
+
+WORKDIR /app/backend
+EXPOSE 8000
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["gunicorn", "backend.wsgi:application", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "1", "--threads", "4", \
+     "--access-logfile", "-", "--error-logfile", "-"]

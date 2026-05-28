@@ -1,0 +1,1074 @@
+"""HTTP API for the AutoQuant webapp (django-ninja).
+
+Read-only endpoints (Phase 2). Mutating endpoints + auth come in later phases.
+All endpoints delegate to the existing ``autoquant`` analytics functions via the
+repository layer, so there's exactly one place the DB schema is mapped onto
+pandas. Responses are validated by Pydantic schemas in :mod:`schemas`; pandas
+objects are converted to JSON-safe shapes by :mod:`serialize` first.
+
+The adapter is a process singleton (see :mod:`registry`) -- one yfinance
+``_cache`` is reused across requests.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+from typing import Any, Optional
+
+import pandas as pd
+from django.contrib.auth import authenticate as django_authenticate
+from django.contrib.auth import login as django_login
+from django.contrib.auth import logout as django_logout
+from django.core.cache import cache
+from django.db import transaction as db_transaction
+from django.http import HttpResponse
+from ninja import NinjaAPI, Query
+from ninja.errors import HttpError
+from ninja.security import django_auth
+
+import autoquant as aq
+from autoquant import metrics as m
+from autoquant import portfolio as pf
+from autoquant import signals as sg
+from autoquant.adapters.base import DataUnavailableError
+from autoquant.client import AlphaVantageError, RateLimitError
+
+from . import repository as repo
+from . import serialize as ser
+from .audit import audit
+from .models import AssetClass, AuditEntry, GroupConfig, Holding, HoldingKind, Transaction
+from .registry import get_registry
+from .schemas import (
+    AdapterStatus,
+    DashboardOut,
+    DiversificationOut,
+    EstimateSharesOut,
+    ErrorOut,
+    GroupCreate,
+    GroupOut,
+    LoginIn,
+    MeOut,
+    GroupSummary,
+    HoldingCreate,
+    HoldingOut,
+    HistoryFrameOut,
+    IndicatorsOut,
+    InstrumentQuoteOut,
+    InstrumentSearchHit,
+    PortfolioPosition,
+    PortfolioSnapshotOut,
+    PortfolioTotals,
+    ScoreOut,
+    SettingsOut,
+    SettingsUpdate,
+    Sparkline,
+    TopMover,
+    TransactionCreate,
+    TransactionOut,
+    TransactionPatch,
+    ValueHistoryOut,
+    WatchlistOut,
+    WatchlistScoreOut,
+)
+
+api = NinjaAPI(
+    title="AutoQuant API",
+    version="0.1.0",
+    description=(
+        "Backend for the AutoQuant portfolio webapp. Session-auth + CSRF "
+        "enforced by django_auth on every endpoint except /auth/login, /me, "
+        "and /csrf."
+    ),
+    auth=django_auth,
+)
+# ``django_auth`` is the ninja SessionAuth class: it returns 401 if
+# ``request.user`` isn't authenticated AND enforces a valid CSRF token on
+# unsafe methods. Per-endpoint ``auth=None`` overrides this where needed
+# (login + public health/auth-status). CSRF cookie is primed via /api/csrf,
+# which is served by a plain Django view in backend/backend/urls.py.
+
+
+# ============================================================================ #
+# Helpers
+# ============================================================================ #
+def _tx_revision() -> str:
+    """Cache-busting key. Includes both max id (changes on insert) and count
+    (changes on delete) so the cache busts on either mutation."""
+    last = (
+        Transaction.objects.order_by("-id").values_list("id", flat=True).first()
+    ) or 0
+    count = Transaction.objects.count()
+    return f"{last}:{count}"
+
+
+def _slice_range(df: pd.DataFrame, range_str: str) -> pd.DataFrame:
+    """Trim a date-indexed frame to a UI-friendly range token."""
+    n_map = {"1mo": 21, "3mo": 63, "6mo": 126, "1y": 252, "2y": 504, "5y": 1260}
+    n = n_map.get(range_str)
+    return df.tail(n) if n is not None else df
+
+
+def _filter_dates(
+    df: pd.DataFrame, from_: Optional[date], to_: Optional[date]
+) -> pd.DataFrame:
+    if from_ is not None:
+        df = df.loc[df.index >= pd.Timestamp(from_)]
+    if to_ is not None:
+        df = df.loc[df.index <= pd.Timestamp(to_)]
+    return df
+
+
+def _portfolio_dict() -> dict:
+    return repo.build_portfolio_dict(kind=HoldingKind.PORTFOLIO)
+
+
+def _watchlist_dict() -> dict:
+    return repo.build_portfolio_dict(kind=HoldingKind.WATCHLIST)
+
+
+# ============================================================================ #
+# Error handlers
+# ============================================================================ #
+@api.exception_handler(DataUnavailableError)
+def _data_unavailable(request, exc):
+    return api.create_response(request, {"detail": str(exc)}, status=404)
+
+
+@api.exception_handler(RateLimitError)
+def _rate_limited(request, exc):
+    return api.create_response(
+        request, {"detail": str(exc), "limited": True}, status=429
+    )
+
+
+@api.exception_handler(AlphaVantageError)
+def _av_error(request, exc):
+    return api.create_response(request, {"detail": str(exc)}, status=502)
+
+
+# ============================================================================ #
+# Auth (login / logout / current-user). Open endpoints have ``auth=None`` to
+# override the API-wide ``django_auth`` default.
+# ============================================================================ #
+@api.get("/auth/me", response=MeOut, auth=None, tags=["auth"])
+def me(request):
+    """Cheap probe used by the SPA on boot to decide whether to show the
+    login page or the app. Never errors."""
+    if request.user.is_authenticated:
+        return {"authenticated": True, "username": request.user.username}
+    return {"authenticated": False}
+
+
+@api.post(
+    "/auth/login",
+    response={200: MeOut, 401: ErrorOut},
+    auth=None,
+    tags=["auth"],
+)
+def login_view(request, body: LoginIn):
+    """Authenticate against Django's user model + start a session. POST is
+    deliberately open (``auth=None``) so the user can log in without already
+    having a session; CSRF for login is left to same-origin SOP for the SPA."""
+    user = django_authenticate(request, username=body.username, password=body.password)
+    if user is None or not user.is_active:
+        return 401, {"detail": "invalid credentials"}
+    django_login(request, user)
+    audit(request, "/auth/login", "POST", {"username": user.username})
+    return 200, {"authenticated": True, "username": user.username}
+
+
+@api.post("/auth/logout", response={200: MeOut}, tags=["auth"])
+def logout_view(request):
+    """End the current session. Requires being logged in (uses the default
+    ``django_auth``) and thus enforces CSRF on the POST."""
+    if request.user.is_authenticated:
+        audit(request, "/auth/logout", "POST", {"username": request.user.username})
+    django_logout(request)
+    return 200, {"authenticated": False}
+
+
+# ============================================================================ #
+# Portfolio snapshot
+# ============================================================================ #
+@api.get("/portfolio", response=PortfolioSnapshotOut, tags=["portfolio"])
+def get_portfolio(request, asset_class: str = "stocks"):
+    """Current positions for ``asset_class`` valued in EUR, plus group breakdown."""
+    if asset_class not in ("stocks", "etfs"):
+        raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
+
+    adapter = get_registry().adapter
+    portfolio = _portfolio_dict()
+    tx_df = repo.build_transactions_df()
+
+    positions = pf.current_positions(tx_df, portfolio, asset_class=asset_class)
+
+    if positions.empty:
+        return {
+            "asset_class": asset_class,
+            "positions": [],
+            "by_group": [],
+            "totals": {"value_eur": 0.0, "cost_eur": 0.0, "pnl_eur": 0.0, "return_pct": None},
+            "fx_rates": {},
+        }
+
+    prices_local = pf.latest_prices_local(adapter, list(positions.index))
+    ccy_map = pf.ticker_to_currency(portfolio, asset_class)
+    fx_rates = pf.fx_rates_for(adapter, ccy_map.values())
+    valued = pf.value_positions(positions, prices_local, ccy_map, fx_rates)
+    group_df = pf.group_summary(valued, portfolio)
+    totals = pf.portfolio_totals(valued)
+
+    positions_out = []
+    for ticker, row in valued.iterrows():
+        positions_out.append(
+            {
+                "ticker": ticker,
+                "name": row.get("name", ticker),
+                "group": row["group"],
+                "currency": row.get("currency", ccy_map.get(ticker, "USD")),
+                "shares": ser.safe(row["shares"]) or 0.0,
+                "invested_eur": ser.safe(row["invested_eur"]) or 0.0,
+                "fees_eur": ser.safe(row.get("fees_eur")) or 0.0,
+                "price_local": ser.safe_float(row.get("price_local")),
+                "price_eur": ser.safe_float(row.get("price_eur")),
+                "value_eur": ser.safe_float(row.get("value_eur")),
+                "cost_eur": ser.safe(row["cost_eur"]) or 0.0,
+                "pnl_eur": ser.safe_float(row.get("pnl_eur")),
+                "return_pct": ser.safe_float(row.get("return_pct")),
+                "weight": ser.safe_float(row.get("weight")),
+            }
+        )
+
+    by_group_out = []
+    for group, row in group_df.iterrows():
+        by_group_out.append(
+            {
+                "group": group,
+                "value_eur": ser.safe(row["value_eur"]) or 0.0,
+                "cost_eur": ser.safe(row["cost_eur"]) or 0.0,
+                "pnl_eur": ser.safe(row["pnl_eur"]) or 0.0,
+                "return_pct": ser.safe_float(row.get("return_pct")),
+                "weight": ser.safe_float(row.get("weight")),
+                "target_weight": ser.safe_float(row.get("target_weight")),
+                "drift_pct": ser.safe_float(row.get("drift_pct")),
+            }
+        )
+
+    return {
+        "asset_class": asset_class,
+        "positions": positions_out,
+        "by_group": by_group_out,
+        "totals": {
+            "value_eur": ser.safe(totals["value_eur"]) or 0.0,
+            "cost_eur": ser.safe(totals["cost_eur"]) or 0.0,
+            "pnl_eur": ser.safe(totals["pnl_eur"]) or 0.0,
+            "return_pct": ser.safe_float(totals.get("return_pct")),
+        },
+        "fx_rates": {k: float(v) for k, v in fx_rates.items()},
+    }
+
+
+# ============================================================================ #
+# Value history
+# ============================================================================ #
+@api.get("/portfolio/history", response=ValueHistoryOut, tags=["portfolio"])
+def get_history(
+    request,
+    asset_class: str = "stocks",
+    from_: Optional[date] = Query(None, alias="from"),
+    to_: Optional[date] = Query(None, alias="to"),
+):
+    """EUR value time-series for ``asset_class`` (by ticker, by group, total, invested)."""
+    if asset_class not in ("stocks", "etfs"):
+        raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
+
+    adapter = get_registry().adapter
+    portfolio = _portfolio_dict()
+    tx_df = repo.build_transactions_df()
+    hist = pf.value_history(adapter, tx_df, portfolio, asset_class=asset_class)
+
+    total = _filter_dates(hist["total"].to_frame("total"), from_, to_)["total"]
+    by_ticker = _filter_dates(hist["by_ticker"], from_, to_)
+    by_group = _filter_dates(hist["by_group"], from_, to_)
+    invested = _filter_dates(hist["invested"].to_frame("invested"), from_, to_)["invested"]
+
+    return {
+        "asset_class": asset_class,
+        "dates": [d.date().isoformat() if hasattr(d, "date") else str(d) for d in total.index],
+        "by_ticker": {
+            str(col): ser.series_to_list(by_ticker[col]) for col in by_ticker.columns
+        },
+        "by_group": {
+            str(col): ser.series_to_list(by_group[col]) for col in by_group.columns
+        },
+        "total": ser.series_to_list(total),
+        "invested": ser.series_to_list(invested),
+    }
+
+
+# ============================================================================ #
+# Dashboard
+# ============================================================================ #
+@api.get("/dashboard", response=DashboardOut, tags=["dashboard"])
+def get_dashboard(request):
+    """Cross-sleeve KPIs + 90-day sparkline + top movers + adapter status."""
+    reg = get_registry()
+    adapter = reg.adapter
+    portfolio = _portfolio_dict()
+    tx_df = repo.build_transactions_df()
+
+    cache_key = f"dashboard:{reg.name}:{_tx_revision()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # --- per-sleeve totals ---
+    def _sleeve_totals(asset_class: str) -> dict:
+        positions = pf.current_positions(tx_df, portfolio, asset_class=asset_class)
+        if positions.empty:
+            return {"value_eur": 0.0, "cost_eur": 0.0, "pnl_eur": 0.0, "return_pct": None}
+        prices = pf.latest_prices_local(adapter, list(positions.index))
+        ccy = pf.ticker_to_currency(portfolio, asset_class)
+        fx = pf.fx_rates_for(adapter, ccy.values())
+        valued = pf.value_positions(positions, prices, ccy, fx)
+        totals = pf.portfolio_totals(valued)
+        return {
+            "value_eur": ser.safe(totals["value_eur"]) or 0.0,
+            "cost_eur": ser.safe(totals["cost_eur"]) or 0.0,
+            "pnl_eur": ser.safe(totals["pnl_eur"]) or 0.0,
+            "return_pct": ser.safe_float(totals.get("return_pct")),
+        }
+
+    stocks_totals = _sleeve_totals("stocks")
+    etfs_totals = _sleeve_totals("etfs")
+    combined = {
+        "value_eur": stocks_totals["value_eur"] + etfs_totals["value_eur"],
+        "cost_eur": stocks_totals["cost_eur"] + etfs_totals["cost_eur"],
+        "pnl_eur": stocks_totals["pnl_eur"] + etfs_totals["pnl_eur"],
+        "return_pct": None,
+    }
+    if combined["cost_eur"]:
+        combined["return_pct"] = (combined["value_eur"] / combined["cost_eur"] - 1) * 100
+
+    # --- sparkline: last 90 days of total EUR value, both sleeves combined ---
+    sleeves_total = []
+    for ac in ("stocks", "etfs"):
+        if pf.all_tickers(portfolio, ac):
+            hist = pf.value_history(adapter, tx_df, portfolio, asset_class=ac)
+            sleeves_total.append(hist["total"])
+    if sleeves_total:
+        combined_total = pd.concat(sleeves_total, axis=1).sum(axis=1).tail(90)
+    else:
+        combined_total = pd.Series(dtype=float)
+    sparkline = {
+        "dates": [d.date().isoformat() if hasattr(d, "date") else str(d) for d in combined_total.index],
+        "values": ser.series_to_list(combined_total),
+    }
+
+    # --- top movers: largest |daily % change| across all portfolio tickers ---
+    all_tickers = pf.all_tickers(portfolio, "all")
+    movers: list[dict] = []
+    if all_tickers:
+        closes = adapter.get_close_prices(all_tickers, interval="daily").ffill()
+        if len(closes) >= 2:
+            chg = (closes.iloc[-1] / closes.iloc[-2] - 1) * 100
+            chg = chg.dropna()
+            name_map = pf.ticker_to_name(portfolio, "all")
+            group_map = pf.ticker_to_group(portfolio, "all")
+            asset_class_map = {
+                **{t: "stocks" for t in pf.all_tickers(portfolio, "stocks")},
+                **{t: "etfs" for t in pf.all_tickers(portfolio, "etfs")},
+            }
+            for ticker in chg.abs().sort_values(ascending=False).head(5).index:
+                movers.append(
+                    {
+                        "ticker": ticker,
+                        "name": name_map.get(ticker, ticker),
+                        "asset_class": asset_class_map.get(ticker, "stocks"),
+                        "change_pct": float(chg[ticker]),
+                        "last_close": float(closes[ticker].iloc[-1]),
+                        "value_eur": None,  # filled by frontend if it wants
+                    }
+                )
+
+    result = {
+        "stocks": stocks_totals,
+        "etfs": etfs_totals,
+        "combined": combined,
+        "sparkline": sparkline,
+        "top_movers": movers,
+        "adapter": {"name": reg.name, "av_quota": reg.av_quota_status()},
+    }
+    cache.set(cache_key, result, timeout=5 * 60)
+    return result
+
+
+# ============================================================================ #
+# Diversification (correlation + distance correlation)
+# ============================================================================ #
+@api.get("/diversification", response=DiversificationOut, tags=["portfolio"])
+def get_diversification(
+    request,
+    metric: str = "pearson",
+    asset_class: str = "stocks",
+    lookback: int = 126,
+):
+    """Pairwise return correlation matrix + diversification summary stats."""
+    if metric not in ("pearson", "distance"):
+        raise HttpError(400, "metric must be 'pearson' or 'distance'")
+    if asset_class not in ("stocks", "etfs"):
+        raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
+    if lookback < 5:
+        raise HttpError(400, "lookback must be >= 5")
+
+    reg = get_registry()
+    adapter = reg.adapter
+    portfolio = _portfolio_dict()
+
+    cache_key = f"div:{reg.name}:{metric}:{asset_class}:{lookback}:{_tx_revision()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    if metric == "pearson":
+        matrix = pf.correlation_matrix(adapter, portfolio, asset_class=asset_class, lookback_days=lookback)
+        summary = pf.diversification_summary(matrix)
+    else:
+        matrix = pf.distance_correlation_matrix(adapter, portfolio, asset_class=asset_class, lookback_days=lookback)
+        summary = pf.distance_diversification_summary(matrix)
+
+    payload = {
+        "metric": metric,
+        "asset_class": asset_class,
+        "lookback_days": lookback,
+        "tickers": [str(t) for t in matrix.index],
+        "matrix": [[ser.safe_float(v) for v in row] for row in matrix.to_numpy()],
+        "summary": {str(k): ser.safe(v) for k, v in summary.to_dict().items()},
+        "cached": False,
+    }
+    cache.set(cache_key, {**payload, "cached": False}, timeout=10 * 60)
+    return payload
+
+
+# ============================================================================ #
+# Watchlist signals
+# ============================================================================ #
+@api.get("/watchlist/signals", response=WatchlistOut, tags=["watchlist"])
+def get_watchlist_signals(request, force: bool = False):
+    """BUY / WATCH / AVOID scores for every name on the watchlist."""
+    reg = get_registry()
+    adapter = reg.adapter
+    cache_key = f"watchlist:{reg.name}"
+
+    if not force:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return {"cached": True, "items": cached}
+
+    wl = _watchlist_dict()
+    df = sg.watchlist_signals(adapter, wl)
+
+    items = []
+    for ticker, row in df.iterrows():
+        items.append(
+            {
+                "ticker": ticker,
+                "name": row.get("name", ticker),
+                "group": row.get("group", ""),
+                "currency": row.get("currency", "USD"),
+                "status": row.get("status", "ok"),
+                "recommendation": row.get("recommendation", "-"),
+                "last_price": ser.safe_float(row.get("last_price")),
+                "roc_20d_pct": ser.safe_float(row.get("roc_20d_%")),
+                "rsi_14": ser.safe_float(row.get("rsi_14")),
+                "zscore_20": ser.safe_float(row.get("zscore_20")),
+                "trend": ser.safe_float(row.get("trend")),
+                "momentum": ser.safe_float(row.get("momentum")),
+                "macd": ser.safe_float(row.get("macd")),
+                "mean_reversion": ser.safe_float(row.get("mean_reversion")),
+                "score": ser.safe_float(row.get("score")),
+                "signal": row.get("signal"),
+            }
+        )
+
+    cache.set(cache_key, items, timeout=10 * 60)
+    return {"cached": False, "items": items}
+
+
+# ============================================================================ #
+# Transactions
+# ============================================================================ #
+@api.get("/transactions", response=list[TransactionOut], tags=["transactions"])
+def list_transactions(
+    request,
+    ticker: Optional[str] = None,
+    from_: Optional[date] = Query(None, alias="from"),
+    to_: Optional[date] = Query(None, alias="to"),
+    action: Optional[str] = None,
+):
+    qs = Transaction.objects.all()
+    if ticker:
+        qs = qs.filter(ticker__iexact=ticker)
+    if from_:
+        qs = qs.filter(date__gte=from_)
+    if to_:
+        qs = qs.filter(date__lte=to_)
+    if action:
+        qs = qs.filter(action=action.lower())
+
+    return [_tx_to_dict(t) for t in qs.order_by("-date", "-id")]
+
+
+@api.get("/transactions/export", tags=["transactions"])
+def export_transactions(request):
+    """Stream the ledger as a CSV download."""
+    df = repo.build_transactions_df()
+    csv_text = df.to_csv(index=False)
+    resp = HttpResponse(csv_text, content_type="text/csv")
+    resp["Content-Disposition"] = 'attachment; filename="transactions.csv"'
+    return resp
+
+
+def _tx_to_dict(t: Transaction) -> dict:
+    """One Transaction row -> the TransactionOut shape."""
+    return {
+        "id": t.id,
+        "date": t.date.isoformat(),
+        "ticker": t.ticker,
+        "group": t.group,
+        "action": t.action,
+        "amount_eur": float(t.amount_eur),
+        "price_local": float(t.price_local),
+        "listing_currency": t.listing_currency,
+        "eur_per_local": float(t.eur_per_local),
+        "shares": float(t.shares),
+        "fee_eur": float(t.fee_eur),
+        "note": t.note or "",
+    }
+
+
+@api.post(
+    "/transactions",
+    response={201: TransactionOut, 400: ErrorOut},
+    tags=["transactions"],
+)
+def create_transaction(request, body: TransactionCreate):
+    """Log a buy or sell. The backend estimates ``shares``, ``price_local``
+    and ``eur_per_local`` from EOD market data on ``date`` (so the SPA only
+    needs to send the EUR amount and date)."""
+    if body.amount_eur <= 0:
+        return 400, {"detail": "amount_eur must be > 0"}
+    action = (body.action or "buy").lower()
+    if action not in ("buy", "sell"):
+        return 400, {"detail": "action must be 'buy' or 'sell'"}
+
+    ticker = body.ticker.strip().upper() if body.ticker else ""
+    if not ticker:
+        return 400, {"detail": "ticker is required"}
+
+    holding = (
+        Holding.objects.filter(ticker=ticker, kind=HoldingKind.PORTFOLIO).first()
+    )
+    if holding is None:
+        return 400, {
+            "detail": (
+                f"No portfolio holding for ticker '{ticker}'. "
+                "Add it via the Add-Stock flow first."
+            )
+        }
+
+    # Parse date (str ISO -> date).
+    try:
+        trade_date = date.fromisoformat(body.date)
+    except (TypeError, ValueError):
+        return 400, {"detail": f"date must be YYYY-MM-DD (got {body.date!r})"}
+
+    adapter = get_registry().adapter
+    listing_currency = (body.listing_currency or holding.currency or "USD").upper()
+
+    try:
+        est = pf.estimate_shares(
+            adapter, ticker, trade_date, body.amount_eur, listing_currency=listing_currency
+        )
+    except DataUnavailableError as e:
+        return 400, {"detail": f"price unavailable: {e}"}
+
+    sign = -1 if action == "sell" else 1
+    t = Transaction.objects.create(
+        date=trade_date,
+        ticker=ticker,
+        group=holding.group,
+        action=action,
+        amount_eur=Decimal(str(body.amount_eur)) * sign,
+        price_local=Decimal(str(est["price_local"])),
+        listing_currency=est["listing_currency"],
+        eur_per_local=Decimal(str(est["eur_per_local"])),
+        shares=Decimal(str(est["shares"])) * sign,
+        fee_eur=Decimal(str(body.fee_eur or 0)),
+        note=body.note or "",
+    )
+    audit(request, "/transactions", "POST", body.dict() | {"id": t.id})
+    return 201, _tx_to_dict(t)
+
+
+@api.patch("/transactions/{tx_id}", response=TransactionOut, tags=["transactions"])
+def update_transaction(request, tx_id: int, body: TransactionPatch):
+    """Edit just the ``note`` and/or ``fee_eur`` on an existing transaction.
+    Other fields (date/ticker/amount/shares/price/FX) are immutable -- delete
+    and re-create if you need to change them."""
+    t = Transaction.objects.filter(id=tx_id).first()
+    if t is None:
+        raise HttpError(404, f"Transaction {tx_id} not found")
+    if body.note is not None:
+        t.note = body.note
+    if body.fee_eur is not None:
+        t.fee_eur = Decimal(str(body.fee_eur))
+    t.save()
+    audit(request, f"/transactions/{tx_id}", "PATCH", body.dict())
+    return _tx_to_dict(t)
+
+
+@api.delete(
+    "/transactions/{tx_id}",
+    response={204: None, 404: ErrorOut},
+    tags=["transactions"],
+)
+def delete_transaction(request, tx_id: int):
+    deleted, _ = Transaction.objects.filter(id=tx_id).delete()
+    if not deleted:
+        return 404, {"detail": f"Transaction {tx_id} not found"}
+    audit(request, f"/transactions/{tx_id}", "DELETE", {"id": tx_id})
+    return 204, None
+
+
+# ============================================================================ #
+# Holdings + Groups (mutating, Phase 6)
+# ============================================================================ #
+@api.post(
+    "/holdings",
+    response={201: HoldingOut, 400: ErrorOut},
+    tags=["holdings"],
+)
+def create_holding(request, body: HoldingCreate):
+    """Add a new portfolio or watchlist holding. Atomically logs the initial
+    Transaction too if ``initial_amount_eur`` is given (portfolio only) -- the
+    Holding is rolled back if the price fetch fails."""
+    kind = (body.kind or "").lower()
+    asset_class = (body.asset_class or "").lower()
+    if kind not in (HoldingKind.PORTFOLIO, HoldingKind.WATCHLIST):
+        return 400, {"detail": "kind must be 'portfolio' or 'watchlist'"}
+    if asset_class not in (AssetClass.STOCKS, AssetClass.ETFS):
+        return 400, {"detail": "asset_class must be 'stocks' or 'etfs'"}
+
+    ticker = (body.ticker or "").strip().upper()
+    if not ticker:
+        return 400, {"detail": "ticker is required"}
+    name = (body.name or "").strip()
+    if not name:
+        return 400, {"detail": "name is required"}
+    currency = (body.currency or "USD").strip().upper()
+
+    # ETFs always live in the single "ETFs" group.
+    group_name = "ETFs" if asset_class == AssetClass.ETFS else (body.group or "").strip()
+    if not group_name:
+        return 400, {"detail": "group is required for stocks"}
+
+    if Holding.objects.filter(kind=kind, ticker=ticker).exists():
+        return 400, {"detail": f"{ticker} is already in your {kind}"}
+
+    try:
+        with db_transaction.atomic():
+            # 1) Group config (get-or-create; update target_weight/description if newly creating).
+            group_obj, created_group = GroupConfig.objects.get_or_create(
+                asset_class=asset_class,
+                name=group_name,
+                defaults={
+                    "description": (body.group_description or "") or "",
+                    "target_weight": (
+                        Decimal(str(body.target_weight))
+                        if body.target_weight is not None
+                        else None
+                    ),
+                },
+            )
+
+            # 2) Holding row.
+            holding = Holding.objects.create(
+                kind=kind,
+                asset_class=asset_class,
+                group=group_name,
+                ticker=ticker,
+                name=name,
+                currency=currency,
+            )
+
+            # 3) Optional initial Transaction (portfolio only).
+            tx_dict: Optional[dict] = None
+            if (
+                kind == HoldingKind.PORTFOLIO
+                and body.initial_amount_eur is not None
+                and body.initial_amount_eur > 0
+            ):
+                try:
+                    trade_date = (
+                        date.fromisoformat(body.initial_date)
+                        if body.initial_date
+                        else date.today()
+                    )
+                except ValueError:
+                    raise HttpError(400, f"initial_date must be YYYY-MM-DD")
+
+                adapter = get_registry().adapter
+                try:
+                    est = pf.estimate_shares(
+                        adapter,
+                        ticker,
+                        trade_date,
+                        body.initial_amount_eur,
+                        listing_currency=currency,
+                    )
+                except DataUnavailableError as e:
+                    raise HttpError(400, f"Could not fetch price for {ticker}: {e}")
+
+                tx = Transaction.objects.create(
+                    date=trade_date,
+                    ticker=ticker,
+                    group=group_name,
+                    action="buy",
+                    amount_eur=Decimal(str(body.initial_amount_eur)),
+                    price_local=Decimal(str(est["price_local"])),
+                    listing_currency=est["listing_currency"],
+                    eur_per_local=Decimal(str(est["eur_per_local"])),
+                    shares=Decimal(str(est["shares"])),
+                    fee_eur=Decimal(str(body.initial_fee_eur or 0)),
+                    note=(body.initial_note or "initial buy"),
+                )
+                tx_dict = _tx_to_dict(tx)
+    except HttpError:
+        raise
+    except Exception as e:  # pragma: no cover -- defensive
+        return 400, {"detail": f"failed to create holding: {e}"}
+
+    audit(request, "/holdings", "POST", body.dict() | {"id": holding.id})
+    return 201, {
+        "id": holding.id,
+        "kind": holding.kind,
+        "asset_class": holding.asset_class,
+        "group": holding.group,
+        "ticker": holding.ticker,
+        "name": holding.name,
+        "currency": holding.currency,
+        "transaction": tx_dict,
+    }
+
+
+@api.delete(
+    "/holdings/{ticker}",
+    response={204: None, 400: ErrorOut, 404: ErrorOut},
+    tags=["holdings"],
+)
+def delete_holding(request, ticker: str, kind: str = HoldingKind.PORTFOLIO):
+    """Remove a holding. Refuses if portfolio holding has any transactions
+    (delete transactions first); watchlist holdings can be removed freely."""
+    h = Holding.objects.filter(ticker=ticker.upper(), kind=kind).first()
+    if h is None:
+        return 404, {"detail": f"{kind}/{ticker} not found"}
+    if kind == HoldingKind.PORTFOLIO and Transaction.objects.filter(ticker=ticker.upper()).exists():
+        return 400, {
+            "detail": (
+                f"{ticker} has open transactions; delete those first or use the "
+                "Transactions view."
+            )
+        }
+    h.delete()
+    audit(request, f"/holdings/{ticker}", "DELETE", {"ticker": ticker.upper(), "kind": kind})
+    return 204, None
+
+
+@api.post(
+    "/groups",
+    response={201: GroupOut, 400: ErrorOut},
+    tags=["holdings"],
+)
+def upsert_group(request, body: GroupCreate):
+    """Create or update a (asset_class, group_name) config (description +
+    optional target weight). Idempotent."""
+    asset_class = (body.asset_class or "").lower()
+    if asset_class not in (AssetClass.STOCKS, AssetClass.ETFS):
+        return 400, {"detail": "asset_class must be 'stocks' or 'etfs'"}
+    name = (body.name or "").strip()
+    if not name:
+        return 400, {"detail": "name is required"}
+    if asset_class == AssetClass.ETFS and name != "ETFs":
+        return 400, {"detail": "ETF group must be named 'ETFs'"}
+
+    obj, created = GroupConfig.objects.get_or_create(
+        asset_class=asset_class,
+        name=name,
+        defaults={
+            "description": (body.description or ""),
+            "target_weight": (
+                Decimal(str(body.target_weight)) if body.target_weight is not None else None
+            ),
+        },
+    )
+    if not created:
+        if body.description is not None:
+            obj.description = body.description
+        if body.target_weight is not None:
+            obj.target_weight = Decimal(str(body.target_weight))
+        obj.save()
+
+    audit(request, "/groups", "POST", body.dict() | {"created": created})
+    return 201, {
+        "asset_class": obj.asset_class,
+        "name": obj.name,
+        "description": obj.description or "",
+        "target_weight": float(obj.target_weight) if obj.target_weight is not None else None,
+    }
+
+
+# ============================================================================ #
+# Instruments (search / quote / history / indicators / score / estimate-shares)
+# ============================================================================ #
+@api.get("/instruments/search", response=list[InstrumentSearchHit], tags=["instruments"])
+def search_instruments(request, q: str):
+    """Resolve a company name or partial ticker through the active adapter's
+    symbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``)."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+
+    cache_key = f"search:{get_registry().name}:{q.lower()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    adapter = get_registry().adapter
+    df = adapter.search_symbols(q)
+    out = []
+    if df is not None and not df.empty:
+        for _, r in df.iterrows():
+            out.append(
+                {
+                    "symbol": str(r.get("symbol") or ""),
+                    "name": (r.get("name") or "") or None,
+                    "type": (r.get("type") or "") or None,
+                    "region": (r.get("region") or "") or None,
+                    "currency": (r.get("currency") or "") or None,
+                }
+            )
+    cache.set(cache_key, out, timeout=60 * 60)
+    return out
+
+
+@api.get("/instruments/{ticker}/quote", response=InstrumentQuoteOut, tags=["instruments"])
+def get_instrument_quote(request, ticker: str):
+    """Latest quote (price, change %, volume, last trading day)."""
+    adapter = get_registry().adapter
+    q = adapter.get_quote(ticker)
+    return {
+        "symbol": ticker,
+        "price": ser.safe_float(q.get("price")),
+        "open": ser.safe_float(q.get("open")),
+        "high": ser.safe_float(q.get("high")),
+        "low": ser.safe_float(q.get("low")),
+        "previous_close": ser.safe_float(q.get("previous close")),
+        "change": ser.safe_float(q.get("change")),
+        "change_percent": ser.safe_float(q.get("change percent")),
+        "volume": ser.safe_float(q.get("volume")),
+        "latest_trading_day": q.get("latest trading day"),
+    }
+
+
+@api.get("/instruments/{ticker}/history", response=HistoryFrameOut, tags=["instruments"])
+def get_instrument_history(
+    request,
+    ticker: str,
+    interval: str = "daily",
+    range_: str = Query("1y", alias="range"),
+):
+    """OHLCV history. ``interval`` in {daily, weekly, monthly}; ``range`` slices
+    the trailing window (``1mo|3mo|6mo|1y|2y|5y|max``)."""
+    if interval not in ("daily", "weekly", "monthly"):
+        raise HttpError(400, "interval must be daily/weekly/monthly")
+    adapter = get_registry().adapter
+    if interval == "daily":
+        outputsize = "full" if range_ == "max" else "compact"
+        df = adapter.get_daily(ticker, outputsize=outputsize)
+    else:
+        df = adapter.get_history(ticker, interval=interval)
+    df = _slice_range(df, range_)
+    return {
+        "symbol": ticker,
+        "interval": interval,
+        "dates": [d.date().isoformat() if hasattr(d, "date") else str(d) for d in df.index],
+        "open": [ser.safe_float(v) for v in df["open"]],
+        "high": [ser.safe_float(v) for v in df["high"]],
+        "low": [ser.safe_float(v) for v in df["low"]],
+        "close": [ser.safe_float(v) for v in df["close"]],
+        "volume": [ser.safe_float(v) for v in df["volume"]] if "volume" in df.columns else [],
+    }
+
+
+@api.get("/instruments/{ticker}/indicators", response=IndicatorsOut, tags=["instruments"])
+def get_instrument_indicators(
+    request, ticker: str, range_: str = Query("1y", alias="range")
+):
+    """Full technical indicator panel (price + SMA/EMA + RSI + MACD + Bollinger + z-score)."""
+    adapter = get_registry().adapter
+    df = adapter.get_daily(ticker)
+    df = m.add_indicators(df)
+    df = _slice_range(df, range_)
+    return {
+        "symbol": ticker,
+        "dates": [d.date().isoformat() if hasattr(d, "date") else str(d) for d in df.index],
+        "columns": [str(c) for c in df.columns],
+        "data": [[ser.safe_float(v) for v in row] for row in df.itertuples(index=False, name=None)],
+    }
+
+
+@api.get("/instruments/{ticker}/score", response=ScoreOut, tags=["instruments"])
+def get_instrument_score(request, ticker: str):
+    """Composite BUY/HOLD/TRIM quant score for a single ticker."""
+    adapter = get_registry().adapter
+    prices = adapter.get_daily(ticker)["close"]
+    scored = sg.score_series(prices)
+    return {
+        "ticker": ticker,
+        "last_price": ser.safe_float(scored.get("price_usd")),
+        "roc_20d_pct": ser.safe_float(scored.get("roc_20d_%")),
+        "rsi_14": ser.safe_float(scored.get("rsi_14")),
+        "zscore_20": ser.safe_float(scored.get("zscore_20")),
+        "trend": ser.safe_float(scored.get("trend")),
+        "momentum": ser.safe_float(scored.get("momentum")),
+        "macd": ser.safe_float(scored.get("macd")),
+        "mean_reversion": ser.safe_float(scored.get("mean_reversion")),
+        "score": ser.safe_float(scored.get("score")),
+        "signal": scored.get("signal"),
+    }
+
+
+@api.get("/instruments/{ticker}/estimate-shares", response=EstimateSharesOut, tags=["instruments"])
+def estimate_shares(
+    request,
+    ticker: str,
+    amount_eur: float,
+    on: date = Query(..., description="Trade date"),
+    listing_currency: str = "USD",
+):
+    """Preview shares + USD/EUR FX for a hypothetical buy on a given date.
+
+    Powers the live preview in the Add-Investment modal (Phase 5).
+    """
+    if amount_eur <= 0:
+        raise HttpError(400, "amount_eur must be > 0")
+    adapter = get_registry().adapter
+    est = pf.estimate_shares(adapter, ticker, on, amount_eur, listing_currency=listing_currency)
+    return {
+        "ticker": ticker,
+        "date": on.isoformat(),
+        "amount_eur": float(amount_eur),
+        "price_local": float(est["price_local"]),
+        "listing_currency": est["listing_currency"],
+        "eur_per_local": float(est["eur_per_local"]),
+        "shares": float(est["shares"]),
+        "price_eur": float(est["price_local"]) * float(est["eur_per_local"]),
+    }
+
+
+# ============================================================================ #
+# Settings
+# ============================================================================ #
+def _av_api_key() -> Optional[str]:
+    """Return the Alpha Vantage API key, checking (in order): the DB Setting
+    row written via PUT /settings, the OS environment, and finally the .env
+    file picked up by ``autoquant.client.load_api_key``."""
+    import os
+    from .models import Setting
+
+    row = Setting.objects.filter(key="av_api_key").first()
+    if row is not None and row.value:
+        return str(row.value)
+    env = os.environ.get("AV_API_KEY")
+    if env:
+        return env
+    try:
+        from autoquant.client import load_api_key
+
+        return load_api_key()
+    except Exception:
+        return None
+
+
+@api.get("/settings", response=SettingsOut, tags=["settings"])
+def get_settings(request):
+    reg = get_registry()
+    return {
+        "adapter": reg.name,
+        "base_currency": "EUR",
+        "av_quota": reg.av_quota_status(),
+        "av_api_key_set": _av_api_key() is not None,
+    }
+
+
+@api.put("/settings", response={200: SettingsOut, 400: ErrorOut}, tags=["settings"])
+def update_settings(request, body: SettingsUpdate):
+    """Persist a new AV API key and/or hot-swap the active adapter."""
+    from .models import Setting
+
+    reg = get_registry()
+
+    # Persist AV API key if provided. Empty string clears it.
+    if body.av_api_key is not None:
+        cleaned = body.av_api_key.strip()
+        if cleaned:
+            Setting.objects.update_or_create(key="av_api_key", defaults={"value": cleaned})
+        else:
+            Setting.objects.filter(key="av_api_key").delete()
+
+    # Adapter swap if requested.
+    if body.adapter:
+        name = body.adapter.lower().strip()
+        if name in ("yfinance", "yahoo", "yf"):
+            try:
+                reg.swap("yfinance")
+            except Exception as exc:
+                return 400, {"detail": f"yfinance adapter failed: {exc}"}
+        elif name in ("alphavantage", "alpha", "av", "alpha_vantage"):
+            api_key = _av_api_key()
+            if not api_key:
+                return 400, {
+                    "detail": (
+                        "Alpha Vantage adapter needs an API key. Save one with "
+                        "av_api_key first."
+                    )
+                }
+            try:
+                reg.swap("alphavantage", api_key=api_key)
+            except Exception as exc:
+                return 400, {"detail": f"alphavantage adapter failed: {exc}"}
+        else:
+            return 400, {"detail": f"unknown adapter: {body.adapter}"}
+
+        # Adapter change can invalidate cached snapshots keyed by adapter name.
+        cache.clear()
+
+    audit(request, "/settings", "PUT", body.dict())
+    return 200, {
+        "adapter": reg.name,
+        "base_currency": "EUR",
+        "av_quota": reg.av_quota_status(),
+        "av_api_key_set": _av_api_key() is not None,
+    }
+
+
+@api.post("/cache/clear", response={204: None}, tags=["settings"])
+def clear_cache(request):
+    """Wipe Django's view cache and the adapter's in-memory cache.
+    Use when prices look stale or after a manual data correction."""
+    cache.clear()
+    get_registry().clear_cache()
+    audit(request, "/cache/clear", "POST", {})
+    return 204, None

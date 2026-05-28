@@ -1,0 +1,2844 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AutoQuant API",
+    "version": "0.1.0",
+    "description": "Backend for the AutoQuant portfolio webapp. Session-auth + CSRF enforced by django_auth on every endpoint except /auth/login, /me, and /csrf."
+  },
+  "paths": {
+    "/api/auth/me": {
+      "get": {
+        "operationId": "portfolio_app_api_me",
+        "summary": "Me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Cheap probe used by the SPA on boot to decide whether to show the\nlogin page or the app. Never errors.",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "portfolio_app_api_login_view",
+        "summary": "Login View",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Authenticate against Django's user model + start a session. POST is\ndeliberately open (``auth=None``) so the user can log in without already\nhaving a session; CSRF for login is left to same-origin SOP for the SPA.",
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "portfolio_app_api_logout_view",
+        "summary": "Logout View",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "End the current session. Requires being logged in (uses the default\n``django_auth``) and thus enforces CSRF on the POST.",
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/portfolio": {
+      "get": {
+        "operationId": "portfolio_app_api_get_portfolio",
+        "summary": "Get Portfolio",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_class",
+            "schema": {
+              "default": "stocks",
+              "title": "Asset Class",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioSnapshotOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Current positions for ``asset_class`` valued in EUR, plus group breakdown.",
+        "tags": [
+          "portfolio"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/portfolio/history": {
+      "get": {
+        "operationId": "portfolio_app_api_get_history",
+        "summary": "Get History",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_class",
+            "schema": {
+              "default": "stocks",
+              "title": "Asset Class",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValueHistoryOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "EUR value time-series for ``asset_class`` (by ticker, by group, total, invested).",
+        "tags": [
+          "portfolio"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/dashboard": {
+      "get": {
+        "operationId": "portfolio_app_api_get_dashboard",
+        "summary": "Get Dashboard",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Cross-sleeve KPIs + 90-day sparkline + top movers + adapter status.",
+        "tags": [
+          "dashboard"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/diversification": {
+      "get": {
+        "operationId": "portfolio_app_api_get_diversification",
+        "summary": "Get Diversification",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "metric",
+            "schema": {
+              "default": "pearson",
+              "title": "Metric",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "asset_class",
+            "schema": {
+              "default": "stocks",
+              "title": "Asset Class",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "lookback",
+            "schema": {
+              "default": 126,
+              "title": "Lookback",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiversificationOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Pairwise return correlation matrix + diversification summary stats.",
+        "tags": [
+          "portfolio"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/watchlist/signals": {
+      "get": {
+        "operationId": "portfolio_app_api_get_watchlist_signals",
+        "summary": "Get Watchlist Signals",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force",
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "BUY / WATCH / AVOID scores for every name on the watchlist.",
+        "tags": [
+          "watchlist"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/transactions": {
+      "get": {
+        "operationId": "portfolio_app_api_list_transactions",
+        "summary": "List Transactions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ticker",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ticker"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TransactionOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "transactions"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "portfolio_app_api_create_transaction",
+        "summary": "Create Transaction",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Log a buy or sell. The backend estimates ``shares``, ``price_local``\nand ``eur_per_local`` from EOD market data on ``date`` (so the SPA only\nneeds to send the EUR amount and date).",
+        "tags": [
+          "transactions"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransactionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/transactions/export": {
+      "get": {
+        "operationId": "portfolio_app_api_export_transactions",
+        "summary": "Export Transactions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "description": "Stream the ledger as a CSV download.",
+        "tags": [
+          "transactions"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/transactions/{tx_id}": {
+      "patch": {
+        "operationId": "portfolio_app_api_update_transaction",
+        "summary": "Update Transaction",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tx_id",
+            "schema": {
+              "title": "Tx Id",
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Edit just the ``note`` and/or ``fee_eur`` on an existing transaction.\nOther fields (date/ticker/amount/shares/price/FX) are immutable -- delete\nand re-create if you need to change them.",
+        "tags": [
+          "transactions"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransactionPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "portfolio_app_api_delete_transaction",
+        "summary": "Delete Transaction",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tx_id",
+            "schema": {
+              "title": "Tx Id",
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "transactions"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/holdings": {
+      "post": {
+        "operationId": "portfolio_app_api_create_holding",
+        "summary": "Create Holding",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Add a new portfolio or watchlist holding. Atomically logs the initial\nTransaction too if ``initial_amount_eur`` is given (portfolio only) -- the\nHolding is rolled back if the price fetch fails.",
+        "tags": [
+          "holdings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/holdings/{ticker}": {
+      "delete": {
+        "operationId": "portfolio_app_api_delete_holding",
+        "summary": "Delete Holding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "default": "portfolio",
+              "title": "Kind",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Remove a holding. Refuses if portfolio holding has any transactions\n(delete transactions first); watchlist holdings can be removed freely.",
+        "tags": [
+          "holdings"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/groups": {
+      "post": {
+        "operationId": "portfolio_app_api_upsert_group",
+        "summary": "Upsert Group",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Create or update a (asset_class, group_name) config (description +\noptional target weight). Idempotent.",
+        "tags": [
+          "holdings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/instruments/search": {
+      "get": {
+        "operationId": "portfolio_app_api_search_instruments",
+        "summary": "Search Instruments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "title": "Q",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InstrumentSearchHit"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "description": "Resolve a company name or partial ticker through the active adapter's\nsymbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).",
+        "tags": [
+          "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/instruments/{ticker}/quote": {
+      "get": {
+        "operationId": "portfolio_app_api_get_instrument_quote",
+        "summary": "Get Instrument Quote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentQuoteOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Latest quote (price, change %, volume, last trading day).",
+        "tags": [
+          "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/instruments/{ticker}/history": {
+      "get": {
+        "operationId": "portfolio_app_api_get_instrument_history",
+        "summary": "Get Instrument History",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "interval",
+            "schema": {
+              "default": "daily",
+              "title": "Interval",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "default": "1y",
+              "title": "Range",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryFrameOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "OHLCV history. ``interval`` in {daily, weekly, monthly}; ``range`` slices\nthe trailing window (``1mo|3mo|6mo|1y|2y|5y|max``).",
+        "tags": [
+          "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/instruments/{ticker}/indicators": {
+      "get": {
+        "operationId": "portfolio_app_api_get_instrument_indicators",
+        "summary": "Get Instrument Indicators",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "default": "1y",
+              "title": "Range",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndicatorsOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Full technical indicator panel (price + SMA/EMA + RSI + MACD + Bollinger + z-score).",
+        "tags": [
+          "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/instruments/{ticker}/score": {
+      "get": {
+        "operationId": "portfolio_app_api_get_instrument_score",
+        "summary": "Get Instrument Score",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Composite BUY/HOLD/TRIM quant score for a single ticker.",
+        "tags": [
+          "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/instruments/{ticker}/estimate-shares": {
+      "get": {
+        "operationId": "portfolio_app_api_estimate_shares",
+        "summary": "Estimate Shares",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "amount_eur",
+            "schema": {
+              "title": "Amount Eur",
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "on",
+            "schema": {
+              "description": "Trade date",
+              "format": "date",
+              "title": "On",
+              "type": "string"
+            },
+            "required": true,
+            "description": "Trade date"
+          },
+          {
+            "in": "query",
+            "name": "listing_currency",
+            "schema": {
+              "default": "USD",
+              "title": "Listing Currency",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateSharesOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Preview shares + USD/EUR FX for a hypothetical buy on a given date.\n\nPowers the live preview in the Add-Investment modal (Phase 5).",
+        "tags": [
+          "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "operationId": "portfolio_app_api_get_settings",
+        "summary": "Get Settings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "settings"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "portfolio_app_api_update_settings",
+        "summary": "Update Settings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Persist a new AV API key and/or hot-swap the active adapter.",
+        "tags": [
+          "settings"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/cache/clear": {
+      "post": {
+        "operationId": "portfolio_app_api_clear_cache",
+        "summary": "Clear Cache",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "description": "Wipe Django's view cache and the adapter's in-memory cache.\nUse when prices look stale or after a manual data correction.",
+        "tags": [
+          "settings"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "MeOut": {
+        "properties": {
+          "authenticated": {
+            "title": "Authenticated",
+            "type": "boolean"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "authenticated"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
+      "ErrorOut": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "limited": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limited"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorOut",
+        "type": "object"
+      },
+      "LoginIn": {
+        "properties": {
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginIn",
+        "type": "object"
+      },
+      "GroupSummary": {
+        "properties": {
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "value_eur": {
+            "title": "Value Eur",
+            "type": "number"
+          },
+          "cost_eur": {
+            "title": "Cost Eur",
+            "type": "number"
+          },
+          "pnl_eur": {
+            "title": "Pnl Eur",
+            "type": "number"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "target_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Weight"
+          },
+          "drift_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drift Pct"
+          }
+        },
+        "required": [
+          "group",
+          "value_eur",
+          "cost_eur",
+          "pnl_eur"
+        ],
+        "title": "GroupSummary",
+        "type": "object"
+      },
+      "PortfolioPosition": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "shares": {
+            "title": "Shares",
+            "type": "number"
+          },
+          "invested_eur": {
+            "title": "Invested Eur",
+            "type": "number"
+          },
+          "fees_eur": {
+            "default": 0.0,
+            "title": "Fees Eur",
+            "type": "number"
+          },
+          "price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Local"
+          },
+          "price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Eur"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          },
+          "cost_eur": {
+            "title": "Cost Eur",
+            "type": "number"
+          },
+          "pnl_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl Eur"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          }
+        },
+        "required": [
+          "ticker",
+          "name",
+          "group",
+          "currency",
+          "shares",
+          "invested_eur",
+          "cost_eur"
+        ],
+        "title": "PortfolioPosition",
+        "type": "object"
+      },
+      "PortfolioSnapshotOut": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioPosition"
+            },
+            "title": "Positions",
+            "type": "array"
+          },
+          "by_group": {
+            "items": {
+              "$ref": "#/components/schemas/GroupSummary"
+            },
+            "title": "By Group",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/PortfolioTotals"
+          },
+          "fx_rates": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Fx Rates",
+            "type": "object"
+          }
+        },
+        "required": [
+          "asset_class",
+          "positions",
+          "by_group",
+          "totals",
+          "fx_rates"
+        ],
+        "title": "PortfolioSnapshotOut",
+        "type": "object"
+      },
+      "PortfolioTotals": {
+        "properties": {
+          "value_eur": {
+            "title": "Value Eur",
+            "type": "number"
+          },
+          "cost_eur": {
+            "title": "Cost Eur",
+            "type": "number"
+          },
+          "pnl_eur": {
+            "title": "Pnl Eur",
+            "type": "number"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          }
+        },
+        "required": [
+          "value_eur",
+          "cost_eur",
+          "pnl_eur"
+        ],
+        "title": "PortfolioTotals",
+        "type": "object"
+      },
+      "ValueHistoryOut": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "dates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "by_ticker": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "By Ticker",
+            "type": "object"
+          },
+          "by_group": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "By Group",
+            "type": "object"
+          },
+          "total": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Total",
+            "type": "array"
+          },
+          "invested": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Invested",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_class",
+          "dates",
+          "by_ticker",
+          "by_group",
+          "total",
+          "invested"
+        ],
+        "title": "ValueHistoryOut",
+        "type": "object"
+      },
+      "AdapterStatus": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "av_quota": {
+            "additionalProperties": true,
+            "title": "Av Quota",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "av_quota"
+        ],
+        "title": "AdapterStatus",
+        "type": "object"
+      },
+      "DashboardOut": {
+        "properties": {
+          "stocks": {
+            "$ref": "#/components/schemas/PortfolioTotals"
+          },
+          "etfs": {
+            "$ref": "#/components/schemas/PortfolioTotals"
+          },
+          "combined": {
+            "$ref": "#/components/schemas/PortfolioTotals"
+          },
+          "sparkline": {
+            "$ref": "#/components/schemas/Sparkline"
+          },
+          "top_movers": {
+            "items": {
+              "$ref": "#/components/schemas/TopMover"
+            },
+            "title": "Top Movers",
+            "type": "array"
+          },
+          "adapter": {
+            "$ref": "#/components/schemas/AdapterStatus"
+          }
+        },
+        "required": [
+          "stocks",
+          "etfs",
+          "combined",
+          "sparkline",
+          "top_movers",
+          "adapter"
+        ],
+        "title": "DashboardOut",
+        "type": "object"
+      },
+      "Sparkline": {
+        "properties": {
+          "dates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "values": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dates",
+          "values"
+        ],
+        "title": "Sparkline",
+        "type": "object"
+      },
+      "TopMover": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "change_pct": {
+            "title": "Change Pct",
+            "type": "number"
+          },
+          "last_close": {
+            "title": "Last Close",
+            "type": "number"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          }
+        },
+        "required": [
+          "ticker",
+          "name",
+          "asset_class",
+          "change_pct",
+          "last_close"
+        ],
+        "title": "TopMover",
+        "type": "object"
+      },
+      "DiversificationOut": {
+        "properties": {
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "lookback_days": {
+            "title": "Lookback Days",
+            "type": "integer"
+          },
+          "tickers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tickers",
+            "type": "array"
+          },
+          "matrix": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Matrix",
+            "type": "array"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "title": "Summary",
+            "type": "object"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "metric",
+          "asset_class",
+          "lookback_days",
+          "tickers",
+          "matrix",
+          "summary",
+          "cached"
+        ],
+        "title": "DiversificationOut",
+        "type": "object"
+      },
+      "WatchlistOut": {
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WatchlistScoreOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cached",
+          "items"
+        ],
+        "title": "WatchlistOut",
+        "type": "object"
+      },
+      "WatchlistScoreOut": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "recommendation": {
+            "title": "Recommendation",
+            "type": "string"
+          },
+          "last_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Price"
+          },
+          "roc_20d_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roc 20D Pct"
+          },
+          "rsi_14": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi 14"
+          },
+          "zscore_20": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zscore 20"
+          },
+          "trend": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trend"
+          },
+          "momentum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum"
+          },
+          "macd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd"
+          },
+          "mean_reversion": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Reversion"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal"
+          }
+        },
+        "required": [
+          "ticker",
+          "name",
+          "group",
+          "currency",
+          "status",
+          "recommendation"
+        ],
+        "title": "WatchlistScoreOut",
+        "type": "object"
+      },
+      "TransactionOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "amount_eur": {
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "price_local": {
+            "title": "Price Local",
+            "type": "number"
+          },
+          "listing_currency": {
+            "title": "Listing Currency",
+            "type": "string"
+          },
+          "eur_per_local": {
+            "title": "Eur Per Local",
+            "type": "number"
+          },
+          "shares": {
+            "title": "Shares",
+            "type": "number"
+          },
+          "fee_eur": {
+            "title": "Fee Eur",
+            "type": "number"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "ticker",
+          "group",
+          "action",
+          "amount_eur",
+          "price_local",
+          "listing_currency",
+          "eur_per_local",
+          "shares",
+          "fee_eur",
+          "note"
+        ],
+        "title": "TransactionOut",
+        "type": "object"
+      },
+      "TransactionCreate": {
+        "description": "Body for ``POST /api/transactions``. Backend estimates ``shares``,\n``price_local`` and ``eur_per_local`` from EOD data on ``date``.",
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "action": {
+            "default": "buy",
+            "title": "Action",
+            "type": "string"
+          },
+          "amount_eur": {
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "listing_currency": {
+            "default": "USD",
+            "title": "Listing Currency",
+            "type": "string"
+          },
+          "fee_eur": {
+            "default": 0.0,
+            "title": "Fee Eur",
+            "type": "number"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "ticker",
+          "amount_eur"
+        ],
+        "title": "TransactionCreate",
+        "type": "object"
+      },
+      "TransactionPatch": {
+        "description": "Body for ``PATCH /api/transactions/{id}``. Only mutable fields.",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "fee_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee Eur"
+          }
+        },
+        "title": "TransactionPatch",
+        "type": "object"
+      },
+      "HoldingOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "transaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransactionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "asset_class",
+          "group",
+          "ticker",
+          "name",
+          "currency"
+        ],
+        "title": "HoldingOut",
+        "type": "object"
+      },
+      "HoldingCreate": {
+        "description": "Body for ``POST /api/holdings``.\n\nCreates a Holding row. If ``initial_amount_eur`` is provided (and\n``kind='portfolio'``), atomically logs the first Transaction too -- the\nHolding is rolled back if the price fetch fails.\n\nIf ``group`` doesn't exist yet, a ``GroupConfig`` is auto-created with the\noptional ``target_weight`` / ``group_description``.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "currency": {
+            "default": "USD",
+            "title": "Currency",
+            "type": "string"
+          },
+          "target_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Weight"
+          },
+          "group_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Description"
+          },
+          "initial_amount_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Amount Eur"
+          },
+          "initial_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Date"
+          },
+          "initial_fee_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Fee Eur"
+          },
+          "initial_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Note"
+          }
+        },
+        "required": [
+          "kind",
+          "asset_class",
+          "group",
+          "ticker",
+          "name"
+        ],
+        "title": "HoldingCreate",
+        "type": "object"
+      },
+      "GroupOut": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "target_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Weight"
+          }
+        },
+        "required": [
+          "asset_class",
+          "name",
+          "description"
+        ],
+        "title": "GroupOut",
+        "type": "object"
+      },
+      "GroupCreate": {
+        "description": "Body for ``POST /api/groups``. Idempotent: get-or-create + update if exists.",
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "target_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Weight"
+          }
+        },
+        "required": [
+          "asset_class",
+          "name"
+        ],
+        "title": "GroupCreate",
+        "type": "object"
+      },
+      "InstrumentSearchHit": {
+        "properties": {
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "title": "InstrumentSearchHit",
+        "type": "object"
+      },
+      "InstrumentQuoteOut": {
+        "properties": {
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "open": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "previous_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Close"
+          },
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change"
+          },
+          "change_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Percent"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          },
+          "latest_trading_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Trading Day"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "title": "InstrumentQuoteOut",
+        "type": "object"
+      },
+      "HistoryFrameOut": {
+        "description": "OHLCV history, columns as parallel arrays (one entry per date).",
+        "properties": {
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "interval": {
+            "title": "Interval",
+            "type": "string"
+          },
+          "dates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "open": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Open",
+            "type": "array"
+          },
+          "high": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "High",
+            "type": "array"
+          },
+          "low": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Low",
+            "type": "array"
+          },
+          "close": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Close",
+            "type": "array"
+          },
+          "volume": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Volume",
+            "type": "array"
+          }
+        },
+        "required": [
+          "symbol",
+          "interval",
+          "dates",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "title": "HistoryFrameOut",
+        "type": "object"
+      },
+      "IndicatorsOut": {
+        "description": "``metrics.add_indicators`` output, returned split-orient.",
+        "properties": {
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "dates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "data": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "symbol",
+          "dates",
+          "columns",
+          "data"
+        ],
+        "title": "IndicatorsOut",
+        "type": "object"
+      },
+      "ScoreOut": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "last_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Price"
+          },
+          "roc_20d_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roc 20D Pct"
+          },
+          "rsi_14": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi 14"
+          },
+          "zscore_20": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zscore 20"
+          },
+          "trend": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trend"
+          },
+          "momentum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum"
+          },
+          "macd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd"
+          },
+          "mean_reversion": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Reversion"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "title": "ScoreOut",
+        "type": "object"
+      },
+      "EstimateSharesOut": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "amount_eur": {
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "price_local": {
+            "title": "Price Local",
+            "type": "number"
+          },
+          "listing_currency": {
+            "title": "Listing Currency",
+            "type": "string"
+          },
+          "eur_per_local": {
+            "title": "Eur Per Local",
+            "type": "number"
+          },
+          "shares": {
+            "title": "Shares",
+            "type": "number"
+          },
+          "price_eur": {
+            "title": "Price Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker",
+          "date",
+          "amount_eur",
+          "price_local",
+          "listing_currency",
+          "eur_per_local",
+          "shares",
+          "price_eur"
+        ],
+        "title": "EstimateSharesOut",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "properties": {
+          "adapter": {
+            "title": "Adapter",
+            "type": "string"
+          },
+          "base_currency": {
+            "title": "Base Currency",
+            "type": "string"
+          },
+          "av_quota": {
+            "additionalProperties": true,
+            "title": "Av Quota",
+            "type": "object"
+          },
+          "av_api_key_set": {
+            "default": false,
+            "title": "Av Api Key Set",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "adapter",
+          "base_currency",
+          "av_quota"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "SettingsUpdate": {
+        "description": "Body for ``PUT /api/settings``. Both fields optional.",
+        "properties": {
+          "adapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter"
+          },
+          "av_api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Av Api Key"
+          }
+        },
+        "title": "SettingsUpdate",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "SessionAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "sessionid"
+      }
+    }
+  },
+  "servers": []
+}
