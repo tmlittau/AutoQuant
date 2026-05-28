@@ -88,36 +88,110 @@
   let submitting = $state(false);
   let error = $state<string | null>(null);
 
+  // Manual ("use exact symbol") path -- escape hatch for tickers yfinance's
+  // Search API doesn't surface (common for European ETFs like WEBN.DE).
+  let manualEntryChecking = $state(false);
+  let manualEntryError = $state<string | null>(null);
+
   function todayIso() {
     return new Date().toISOString().slice(0, 10);
   }
 
+  // Best-guess currency from a Yahoo-style suffix. Used when manual entry
+  // can't get a currency from the quote response.
+  function currencyFromSuffix(symbol: string): string {
+    const s = symbol.toUpperCase();
+    if (s.endsWith('.DE') || s.endsWith('.F') || s.endsWith('.SG')) return 'EUR';
+    if (s.endsWith('.PA') || s.endsWith('.AS') || s.endsWith('.BR') ||
+        s.endsWith('.LS') || s.endsWith('.MI') || s.endsWith('.MC') ||
+        s.endsWith('.VI') || s.endsWith('.HE')) return 'EUR';
+    if (s.endsWith('.L')) return 'GBP';
+    if (s.endsWith('.SW')) return 'CHF';
+    if (s.endsWith('.TO') || s.endsWith('.V')) return 'CAD';
+    if (s.endsWith('.AX')) return 'AUD';
+    if (s.endsWith('.T')) return 'JPY';
+    if (s.endsWith('.HK')) return 'HKD';
+    return 'USD';
+  }
+
+  /**
+   * Bypass the search dropdown and commit the typed value as the ticker
+   * directly. We verify Yahoo actually has price data via /quote first so
+   * the user gets an immediate "ticker not found" error instead of a
+   * confusing failure on submit.
+   */
+  async function useExactSymbol() {
+    const sym = symbolQuery.trim().toUpperCase();
+    if (sym.length < 1) {
+      manualEntryError = 'Type a symbol first';
+      return;
+    }
+    manualEntryChecking = true;
+    manualEntryError = null;
+    try {
+      const q = (await apiGet('/api/instruments/{ticker}/quote', {
+        params: { path: { ticker: sym } },
+      })) as any;
+      if (!q || q.price == null) {
+        manualEntryError = `Yahoo has no price data for '${sym}'. Check the suffix (.DE/.PA/.AS/.L/…).`;
+        return;
+      }
+      ticker = sym;
+      // /quote doesn't return a long name; default to the symbol so the user
+      // can immediately edit it in the Name field below.
+      if (!name) name = sym;
+      // Currency: keep whatever the user already chose, else guess from suffix.
+      if (!currency || currency === 'USD') currency = currencyFromSuffix(sym);
+      symbolHits = [];
+      showHits = false;
+    } catch (e: any) {
+      manualEntryError = e?.message ?? `Couldn't reach Yahoo for '${sym}'`;
+    } finally {
+      manualEntryChecking = false;
+    }
+  }
+
   // -------------------------------------------------------------------------
-  // Reset form on open (use initial to pre-fill if provided).
+  // Reset form when the modal opens (or when `initial` changes -- e.g. the
+  // user navigates to a different /stock/:ticker page with the modal mounted).
+  //
+  // The body is wrapped in untrack() so that writes-then-reads of internal
+  // state (e.g. `symbolQuery = ticker;` reading the freshly-assigned ticker)
+  // don't register as dependencies. Without untrack, `pickHit` -- which sets
+  // ticker, name, currency -- would invalidate this effect's deps and
+  // re-fire the whole reset, instantly throwing away the user's selection
+  // and snapping assetClass back to its `initial` value. That's exactly the
+  // "clicked an ETF hit and the form jumped back to Stocks" bug.
   // -------------------------------------------------------------------------
   $effect(() => {
     if (!open) return;
-    kind = initial?.kind ?? 'portfolio';
-    assetClass = initial?.assetClass ?? 'stocks';
-    ticker = initial?.ticker ?? '';
-    name = initial?.name ?? '';
-    currency = (initial?.currency ?? 'USD').toUpperCase();
-    symbolQuery = ticker;
-    symbolHits = [];
-    showHits = false;
-    creatingNewGroup = false;
-    newGroupName = '';
-    newGroupTargetPct = null;
-    newGroupDescription = '';
-    withInitialBuy = true;
-    initialDate = todayIso();
-    initialAmount = 50;
-    initialFee = 0;
-    initialNote = '';
-    preview = null;
-    previewError = null;
-    submitting = false;
-    error = null;
+    const _init = initial; // tracked dep: re-fire if parent passes a new prefill
+    untrack(() => {
+      kind = _init?.kind ?? 'portfolio';
+      assetClass = _init?.assetClass ?? 'stocks';
+      const initTicker = _init?.ticker ?? '';
+      ticker = initTicker;
+      name = _init?.name ?? '';
+      currency = (_init?.currency ?? 'USD').toUpperCase();
+      symbolQuery = initTicker;
+      symbolHits = [];
+      showHits = false;
+      creatingNewGroup = false;
+      newGroupName = '';
+      newGroupTargetPct = null;
+      newGroupDescription = '';
+      withInitialBuy = true;
+      initialDate = todayIso();
+      initialAmount = 50;
+      initialFee = 0;
+      initialNote = '';
+      preview = null;
+      previewError = null;
+      submitting = false;
+      error = null;
+      manualEntryError = null;
+      manualEntryChecking = false;
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -352,7 +426,7 @@
     <!-- Symbol search -->
     <div class="relative">
       <span class="block text-xs font-medium text-slate-700 mb-1">
-        Ticker (search a public symbol)
+        Ticker (search or paste an exact Yahoo symbol)
       </span>
       <input
         type="text"
@@ -360,7 +434,7 @@
         oninput={onSymbolInput}
         onfocus={() => (showHits = true)}
         onblur={() => setTimeout(() => (showHits = false), 150)}
-        placeholder="e.g. ASML, Berkshire, NVO …"
+        placeholder="e.g. ASML, Berkshire, WEBN.DE …"
         class="w-full px-3 py-1.5 border border-slate-300 rounded-md font-mono"
       />
       {#if showHits && (symbolLoading || symbolHits.length > 0)}
@@ -386,10 +460,57 @@
           {/each}
         </div>
       {/if}
+
+      <!-- "Use exact symbol" fallback: surfaces when search has 0 hits but
+           the user has typed something. Handles tickers yfinance Search
+           doesn't surface (most European ETFs, some obscure listings). -->
+      {#if !symbolLoading && symbolQuery.trim().length >= 2 && symbolHits.length === 0 && symbolQuery.trim().toUpperCase() !== ticker}
+        <div class="mt-2 flex items-center gap-2 flex-wrap text-xs">
+          <span class="text-slate-500">No search hits.</span>
+          <button
+            type="button"
+            onclick={useExactSymbol}
+            disabled={manualEntryChecking}
+            class="px-2 py-1 border border-blue-200 text-blue-700 bg-blue-50 rounded hover:bg-blue-100 disabled:opacity-60"
+          >
+            {manualEntryChecking
+              ? `Checking '${symbolQuery.trim().toUpperCase()}'…`
+              : `Use '${symbolQuery.trim().toUpperCase()}' as exact symbol →`}
+          </button>
+          <span class="text-slate-400">
+            (validates against Yahoo; great for European ETFs like WEBN.DE)
+          </span>
+        </div>
+      {/if}
+      {#if manualEntryError}
+        <p class="mt-1 text-xs text-red-600">{manualEntryError}</p>
+      {/if}
+
+      <!-- Editable confirmation: once a ticker is set (via pickHit or
+           useExactSymbol), expose Name + Currency as editable inputs so
+           the user can correct yfinance's "shortname" or fill in fields
+           that weren't returned by /quote. -->
       {#if ticker}
-        <p class="mt-1 text-xs text-slate-500">
-          → <span class="font-mono font-medium">{ticker}</span> · {name} · {currency}
-        </p>
+        <div class="mt-2 p-2 border border-slate-200 rounded bg-slate-50">
+          <div class="text-xs text-slate-500 mb-1">
+            → <span class="font-mono font-medium text-slate-700">{ticker}</span>
+          </div>
+          <div class="grid grid-cols-[1fr_6rem] gap-2">
+            <input
+              type="text"
+              bind:value={name}
+              placeholder="Display name"
+              class="px-2 py-1 border border-slate-300 rounded text-sm bg-white"
+            />
+            <input
+              type="text"
+              bind:value={currency}
+              placeholder="CCY"
+              maxlength="6"
+              class="px-2 py-1 border border-slate-300 rounded text-sm font-mono bg-white uppercase"
+            />
+          </div>
+        </div>
       {/if}
     </div>
 
