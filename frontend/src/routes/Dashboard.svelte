@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { link, push } from 'svelte-spa-router';
   import { apiGet } from '../lib/api';
   import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
+  import { pricesRevision } from '../lib/stores';
   import KpiCard from '../components/KpiCard.svelte';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import { fmtEUR, fmtPct } from '../lib/format';
@@ -23,7 +23,12 @@
     }
   }
 
-  onMount(load);
+  // Load on mount and re-run whenever the top-bar Refresh button bumps
+  // pricesRevision -- the global cache-clear is wasted unless we refetch.
+  $effect(() => {
+    const _rev = $pricesRevision;
+    load();
+  });
 
   let sparkData = $derived(
     dash

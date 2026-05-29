@@ -62,6 +62,7 @@ from .schemas import (
     PortfolioSnapshotOut,
     PortfolioTotals,
     ScoreOut,
+    CacheClearedOut,
     SettingsOut,
     SettingsUpdate,
     Sparkline,
@@ -1268,11 +1269,20 @@ def update_settings(request, body: SettingsUpdate):
     }
 
 
-@api.post("/cache/clear", response={204: None}, tags=["settings"])
+@api.post("/cache/clear", response=CacheClearedOut, tags=["settings"])
 def clear_cache(request):
-    """Wipe Django's view cache and the adapter's in-memory cache.
-    Use when prices look stale or after a manual data correction."""
+    """Wipe Django's view cache and the adapter's in-memory price cache.
+
+    Backs the top-bar "Refresh prices" button: the SPA POSTs here, gets back
+    the adapter name + ISO timestamp, then bumps its ``pricesRevision`` store
+    so every mounted view refetches. Returning a body (rather than 204) lets
+    the SPA render an "Updated 14:32" badge after a successful refresh.
+    """
+    from datetime import datetime, timezone
+
     cache.clear()
-    get_registry().clear_cache()
-    audit(request, "/cache/clear", "POST", {})
-    return 204, None
+    reg = get_registry()
+    reg.clear_cache()
+    payload = {"adapter": reg.name, "at": datetime.now(timezone.utc).isoformat()}
+    audit(request, "/cache/clear", "POST", payload)
+    return payload

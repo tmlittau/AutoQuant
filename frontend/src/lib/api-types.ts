@@ -521,8 +521,12 @@ export interface paths {
         put?: never;
         /**
          * Clear Cache
-         * @description Wipe Django's view cache and the adapter's in-memory cache.
-         *     Use when prices look stale or after a manual data correction.
+         * @description Wipe Django's view cache and the adapter's in-memory price cache.
+         *
+         *     Backs the top-bar "Refresh prices" button: the SPA POSTs here, gets back
+         *     the adapter name + ISO timestamp, then bumps its ``pricesRevision`` store
+         *     so every mounted view refetches. Returning a body (rather than 204) lets
+         *     the SPA render an "Updated 14:32" badge after a successful refresh.
          */
         post: operations["portfolio_app_api_clear_cache"];
         delete?: never;
@@ -1080,6 +1084,17 @@ export interface components {
             adapter?: string | null;
             /** Av Api Key */
             av_api_key?: string | null;
+        };
+        /**
+         * CacheClearedOut
+         * @description Response from ``POST /api/cache/clear``. Carries enough info for the
+         *     SPA's top-bar Refresh button to show an "Updated at HH:MM" timestamp.
+         */
+        CacheClearedOut: {
+            /** Adapter */
+            adapter: string;
+            /** At */
+            at: string;
         };
     };
     responses: never;
@@ -1846,12 +1861,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No Content */
-            204: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CacheClearedOut"];
+                };
             };
         };
     };

@@ -9,7 +9,7 @@
    */
   import { push } from 'svelte-spa-router';
   import { apiGet } from '../lib/api';
-  import { transactionsRevision } from '../lib/stores';
+  import { transactionsRevision, pricesRevision } from '../lib/stores';
   import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import KpiCard from './KpiCard.svelte';
@@ -81,10 +81,12 @@
   }
 
   // Re-fetch when the asset class changes (prop change) or whenever a
-  // transaction mutation bumps the revision store.
+  // transaction mutation or the global Refresh button bumps a revision
+  // store.
   $effect(() => {
     const ac = assetClass;
-    const _rev = $transactionsRevision; // dep tracking
+    const _txRev = $transactionsRevision; // dep tracking
+    const _pxRev = $pricesRevision;
     load(ac);
     loadSignals(ac);
   });

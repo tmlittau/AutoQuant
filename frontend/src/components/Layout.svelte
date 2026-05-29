@@ -4,6 +4,7 @@
   import GlobalSearch from './GlobalSearch.svelte';
   import AdapterChip from './AdapterChip.svelte';
   import NavDrawer from './NavDrawer.svelte';
+  import RefreshButton from './RefreshButton.svelte';
   import { authStore, logout } from '../lib/auth';
 
   type Props = { children: Snippet };
@@ -88,9 +89,10 @@
         </button>
       </div>
 
-      <!-- Adapter chip + logout pinned at md+; hidden on mobile (lives in
-           the drawer footer there). -->
+      <!-- Adapter chip + refresh + logout pinned at md+; hidden on mobile
+           (live in the drawer footer there). -->
       <div class="hidden md:flex items-center gap-3">
+        <RefreshButton variant="compact" />
         <AdapterChip />
         {#if $authStore.user}
           <div class="flex items-center gap-2 text-xs">

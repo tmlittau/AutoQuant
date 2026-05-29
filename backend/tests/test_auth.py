@@ -72,4 +72,8 @@ class TestCsrf:
             content_type="application/json",
             HTTP_X_CSRFTOKEN=csrftoken,
         )
-        assert r.status_code == 204
+        # /cache/clear returns 200 with {adapter, at} so the SPA's top-bar
+        # Refresh button can show an "Updated at" timestamp.
+        assert r.status_code == 200
+        body = r.json()
+        assert "adapter" in body and "at" in body

@@ -13,6 +13,7 @@
   import { fly, fade } from 'svelte/transition';
   import { link, router } from 'svelte-spa-router';
   import AdapterChip from './AdapterChip.svelte';
+  import RefreshButton from './RefreshButton.svelte';
   import { authStore, logout } from '../lib/auth';
 
   type NavItem = { href: string; label: string; match: RegExp };
@@ -97,6 +98,7 @@
     </nav>
 
     <footer class="border-t border-slate-200 px-4 py-3 space-y-3">
+      <RefreshButton variant="menu" onAfterClick={onClose} />
       <AdapterChip />
       {#if $authStore.user}
         <div class="flex items-center justify-between text-sm">

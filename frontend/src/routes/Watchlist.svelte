@@ -9,7 +9,7 @@
   import { push } from 'svelte-spa-router';
   import { onMount } from 'svelte';
   import { api, apiGet } from '../lib/api';
-  import { transactionsRevision } from '../lib/stores';
+  import { transactionsRevision, pricesRevision } from '../lib/stores';
   import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import AddStockModal from '../components/AddStockModal.svelte';
@@ -59,10 +59,12 @@
   onMount(() => load(false));
 
   // Re-fetch when the holdings/transactions revision bumps (a new watchlist
-  // entry was added or a holding was removed).
+  // entry was added or a holding was removed) or when the top-bar Refresh
+  // button bumps the prices revision.
   $effect(() => {
-    const _rev = $transactionsRevision;
-    if (_rev > 0) load(false);
+    const _txRev = $transactionsRevision;
+    const _pxRev = $pricesRevision;
+    if (_txRev > 0 || _pxRev > 0) load(false);
   });
 
   // ---------- Signal map scatter ----------

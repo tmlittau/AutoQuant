@@ -10,6 +10,7 @@
    */
   import { apiGet } from '../lib/api';
   import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
+  import { pricesRevision } from '../lib/stores';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import AddStockModal from '../components/AddStockModal.svelte';
   import { fmtPct, fmtNum, fmtDate, fmtLocal } from '../lib/format';
@@ -113,6 +114,7 @@
   $effect(() => {
     const t = ticker;
     const r = range;
+    const _pxRev = $pricesRevision;
     if (t) loadAll(t, r);
   });
 

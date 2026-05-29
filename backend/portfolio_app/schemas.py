@@ -344,6 +344,14 @@ class SettingsUpdate(Schema):
     av_api_key: Optional[str] = None    # write-only; replaces stored key
 
 
+class CacheClearedOut(Schema):
+    """Response from ``POST /api/cache/clear``. Carries enough info for the
+    SPA's top-bar Refresh button to show an "Updated at HH:MM" timestamp."""
+
+    adapter: str
+    at: str                              # ISO-8601 UTC timestamp
+
+
 # --------------------------------------------------------------------------- #
 # Auth
 # --------------------------------------------------------------------------- #

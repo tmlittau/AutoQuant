@@ -9,7 +9,7 @@
    * so the lookback slider feels snappy after the first calc.
    */
   import { apiGet } from '../lib/api';
-  import { transactionsRevision } from '../lib/stores';
+  import { transactionsRevision, pricesRevision } from '../lib/stores';
   import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import { fmtNum } from '../lib/format';
@@ -61,7 +61,8 @@
   $effect(() => {
     const _ac = assetClass;
     const _lb = lookback;
-    const _rev = $transactionsRevision;
+    const _txRev = $transactionsRevision;
+    const _pxRev = $pricesRevision;
     loadBoth();
   });
 
