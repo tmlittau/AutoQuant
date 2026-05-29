@@ -410,9 +410,9 @@ export interface paths {
          *     symbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).
          *
          *     The optional ``type`` parameter filters hits to a single asset class --
-         *     ``stocks`` (equity + mutual funds) or ``etfs`` -- so the Add-Stock modal can
-         *     show only ETFs when adding to the ETFs sleeve and the global nav bar can
-         *     skip non-stock noise.
+         *     ``stocks`` (equity + mutual funds), ``etfs`` or ``crypto`` -- so the
+         *     Add-Stock modal can scope the dropdown and the global nav bar can skip
+         *     non-stock noise.
          */
         get: operations["portfolio_app_api_search_instruments"];
         put?: never;
@@ -753,10 +753,17 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** DashboardOut */
+        /**
+         * DashboardOut
+         * @description Cross-sleeve dashboard payload. ``by_class`` is keyed by asset class
+         *     (stocks / etfs / crypto) so the SPA can render KPI cards by iteration
+         *     instead of hardcoding sleeves. ``combined`` aggregates every sleeve.
+         */
         DashboardOut: {
-            stocks: components["schemas"]["PortfolioTotals"];
-            etfs: components["schemas"]["PortfolioTotals"];
+            /** By Class */
+            by_class: {
+                [key: string]: components["schemas"]["PortfolioTotals"];
+            };
             combined: components["schemas"]["PortfolioTotals"];
             sparkline: components["schemas"]["Sparkline"];
             /** Top Movers */

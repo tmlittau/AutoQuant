@@ -12,7 +12,7 @@
   import { transactionsRevision } from '../lib/stores';
   import Modal from './Modal.svelte';
 
-  type AssetClass = 'stocks' | 'etfs';
+  type AssetClass = 'stocks' | 'etfs' | 'crypto';
 
   type Group = {
     asset_class: AssetClass;

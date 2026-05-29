@@ -100,6 +100,23 @@ api = NinjaAPI(
 # ============================================================================ #
 # Helpers
 # ============================================================================ #
+# Canonical list of the SPA's asset-class buckets. Sourced from the model
+# enum so future widenings flow through automatically. The literal values
+# match the URL query param the SPA sends.
+VALID_ASSET_CLASSES = tuple(AssetClass.values)   # ('stocks', 'etfs', 'crypto')
+
+
+def _assert_asset_class(asset_class: str) -> None:
+    """Raise a uniform HttpError(400) if ``asset_class`` isn't one of the
+    SPA's three sleeves. Used by every endpoint that takes asset_class as a
+    query param so the error message stays consistent across the API."""
+    if asset_class not in VALID_ASSET_CLASSES:
+        raise HttpError(
+            400,
+            f"asset_class must be one of {VALID_ASSET_CLASSES} (got {asset_class!r})",
+        )
+
+
 def _tx_revision() -> str:
     """Cache-busting key. Includes both max id (changes on insert) and count
     (changes on delete) so the cache busts on either mutation."""
@@ -202,8 +219,7 @@ def logout_view(request):
 @api.get("/portfolio", response=PortfolioSnapshotOut, tags=["portfolio"])
 def get_portfolio(request, asset_class: str = "stocks"):
     """Current positions for ``asset_class`` valued in EUR, plus group breakdown."""
-    if asset_class not in ("stocks", "etfs"):
-        raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
+    _assert_asset_class(asset_class)
 
     adapter = get_registry().adapter
     portfolio = _portfolio_dict()
@@ -288,8 +304,7 @@ def get_history(
     to_: Optional[date] = Query(None, alias="to"),
 ):
     """EUR value time-series for ``asset_class`` (by ticker, by group, total, invested)."""
-    if asset_class not in ("stocks", "etfs"):
-        raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
+    _assert_asset_class(asset_class)
 
     adapter = get_registry().adapter
     portfolio = _portfolio_dict()
@@ -348,20 +363,21 @@ def get_dashboard(request):
             "return_pct": ser.safe_float(totals.get("return_pct")),
         }
 
-    stocks_totals = _sleeve_totals("stocks")
-    etfs_totals = _sleeve_totals("etfs")
+    # Per-sleeve totals fanned out across every valid asset class so adding
+    # a fourth one later is just a model-enum change.
+    by_class = {ac: _sleeve_totals(ac) for ac in VALID_ASSET_CLASSES}
     combined = {
-        "value_eur": stocks_totals["value_eur"] + etfs_totals["value_eur"],
-        "cost_eur": stocks_totals["cost_eur"] + etfs_totals["cost_eur"],
-        "pnl_eur": stocks_totals["pnl_eur"] + etfs_totals["pnl_eur"],
+        "value_eur": sum(t["value_eur"] for t in by_class.values()),
+        "cost_eur":  sum(t["cost_eur"] for t in by_class.values()),
+        "pnl_eur":   sum(t["pnl_eur"] for t in by_class.values()),
         "return_pct": None,
     }
     if combined["cost_eur"]:
         combined["return_pct"] = (combined["value_eur"] / combined["cost_eur"] - 1) * 100
 
-    # --- sparkline: last 90 days of total EUR value, both sleeves combined ---
+    # --- sparkline: last 90 days of total EUR value, all sleeves combined ---
     sleeves_total = []
-    for ac in ("stocks", "etfs"):
+    for ac in VALID_ASSET_CLASSES:
         if pf.all_tickers(portfolio, ac):
             hist = pf.value_history(adapter, tx_df, portfolio, asset_class=ac)
             sleeves_total.append(hist["total"])
@@ -383,11 +399,13 @@ def get_dashboard(request):
             chg = (closes.iloc[-1] / closes.iloc[-2] - 1) * 100
             chg = chg.dropna()
             name_map = pf.ticker_to_name(portfolio, "all")
-            group_map = pf.ticker_to_group(portfolio, "all")
-            asset_class_map = {
-                **{t: "stocks" for t in pf.all_tickers(portfolio, "stocks")},
-                **{t: "etfs" for t in pf.all_tickers(portfolio, "etfs")},
-            }
+            # Tag each ticker with its sleeve so the frontend can route the
+            # row click to the right portfolio sub-tab. Extends automatically
+            # for any future asset class.
+            asset_class_map: dict[str, str] = {}
+            for ac in VALID_ASSET_CLASSES:
+                for t in pf.all_tickers(portfolio, ac):
+                    asset_class_map[t] = ac
             for ticker in chg.abs().sort_values(ascending=False).head(5).index:
                 movers.append(
                     {
@@ -401,8 +419,7 @@ def get_dashboard(request):
                 )
 
     result = {
-        "stocks": stocks_totals,
-        "etfs": etfs_totals,
+        "by_class": by_class,
         "combined": combined,
         "sparkline": sparkline,
         "top_movers": movers,
@@ -425,8 +442,7 @@ def get_diversification(
     """Pairwise return correlation matrix + diversification summary stats."""
     if metric not in ("pearson", "distance"):
         raise HttpError(400, "metric must be 'pearson' or 'distance'")
-    if asset_class not in ("stocks", "etfs"):
-        raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
+    _assert_asset_class(asset_class)
     if lookback < 5:
         raise HttpError(400, "lookback must be >= 5")
 
@@ -477,8 +493,7 @@ def get_portfolio_signals(
     candidates) vs. oversold (BUY-more candidates) before their next monthly
     deposit. Cached 10 min keyed by (adapter, asset_class, tx revision).
     """
-    if asset_class not in ("stocks", "etfs"):
-        raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
+    _assert_asset_class(asset_class)
 
     reg = get_registry()
     adapter = reg.adapter
@@ -954,8 +969,13 @@ def create_holding(request, body: HoldingCreate):
     asset_class = (body.asset_class or "").lower()
     if kind not in (HoldingKind.PORTFOLIO, HoldingKind.WATCHLIST):
         return 400, {"detail": "kind must be 'portfolio' or 'watchlist'"}
-    if asset_class not in (AssetClass.STOCKS, AssetClass.ETFS):
-        return 400, {"detail": "asset_class must be 'stocks' or 'etfs'"}
+    if asset_class not in VALID_ASSET_CLASSES:
+        return 400, {
+            "detail": (
+                f"asset_class must be one of {VALID_ASSET_CLASSES} "
+                f"(got {asset_class!r})"
+            )
+        }
 
     ticker = (body.ticker or "").strip().upper()
     if not ticker:
@@ -965,8 +985,15 @@ def create_holding(request, body: HoldingCreate):
         return 400, {"detail": "name is required"}
     currency = (body.currency or "USD").strip().upper()
 
-    # ETFs always live in the single "ETFs" group.
-    group_name = "ETFs" if asset_class == AssetClass.ETFS else (body.group or "").strip()
+    # ETFs and Crypto are each pinned to a single canonical group ("ETFs" /
+    # "Crypto") -- they're flat sleeves with no sub-categories, mirroring the
+    # repository.build_portfolio_dict output.
+    if asset_class == AssetClass.ETFS:
+        group_name = "ETFs"
+    elif asset_class == AssetClass.CRYPTO:
+        group_name = "Crypto"
+    else:
+        group_name = (body.group or "").strip()
     if not group_name:
         return 400, {"detail": "group is required for stocks"}
 
@@ -1103,7 +1130,7 @@ def list_groups(request, asset_class: Optional[str] = None):
     qs = GroupConfig.objects.all()
     if asset_class:
         ac = asset_class.lower()
-        if ac not in (AssetClass.STOCKS, AssetClass.ETFS):
+        if ac not in VALID_ASSET_CLASSES:
             raise HttpError(400, "asset_class must be 'stocks' or 'etfs'")
         qs = qs.filter(asset_class=ac)
     return [_group_to_dict(g) for g in qs.order_by("asset_class", "name")]
@@ -1118,13 +1145,22 @@ def upsert_group(request, body: GroupCreate):
     """Create or update a (asset_class, group_name) config (description +
     optional target weight). Idempotent."""
     asset_class = (body.asset_class or "").lower()
-    if asset_class not in (AssetClass.STOCKS, AssetClass.ETFS):
-        return 400, {"detail": "asset_class must be 'stocks' or 'etfs'"}
+    if asset_class not in VALID_ASSET_CLASSES:
+        return 400, {
+            "detail": (
+                f"asset_class must be one of {VALID_ASSET_CLASSES} "
+                f"(got {asset_class!r})"
+            )
+        }
     name = (body.name or "").strip()
     if not name:
         return 400, {"detail": "name is required"}
+    # ETFs and Crypto are flat sleeves -- only the single canonical group is
+    # ever allowed for them.
     if asset_class == AssetClass.ETFS and name != "ETFs":
         return 400, {"detail": "ETF group must be named 'ETFs'"}
+    if asset_class == AssetClass.CRYPTO and name != "Crypto":
+        return 400, {"detail": "Crypto group must be named 'Crypto'"}
 
     obj, created = GroupConfig.objects.get_or_create(
         asset_class=asset_class,
@@ -1158,8 +1194,13 @@ def update_group(request, asset_class: str, name: str, body: GroupPatch):
     Pass ``clear_target_weight=true`` to wipe the target back to NULL (e.g. a
     sleeve you no longer want to rebalance against)."""
     ac = (asset_class or "").lower()
-    if ac not in (AssetClass.STOCKS, AssetClass.ETFS):
-        return 400, {"detail": "asset_class must be 'stocks' or 'etfs'"}
+    if ac not in VALID_ASSET_CLASSES:
+        return 400, {
+            "detail": (
+                f"asset_class must be one of {VALID_ASSET_CLASSES} "
+                f"(got {asset_class!r})"
+            )
+        }
     obj = GroupConfig.objects.filter(asset_class=ac, name=name).first()
     if obj is None:
         return 404, {"detail": f"group '{name}' (asset_class={ac}) not found"}
@@ -1191,8 +1232,13 @@ def delete_group(request, asset_class: str, name: str):
     those first. Also refuses to delete the canonical 'ETFs' group while ETF
     holdings exist; ETF holdings have nowhere else to live."""
     ac = (asset_class or "").lower()
-    if ac not in (AssetClass.STOCKS, AssetClass.ETFS):
-        return 400, {"detail": "asset_class must be 'stocks' or 'etfs'"}
+    if ac not in VALID_ASSET_CLASSES:
+        return 400, {
+            "detail": (
+                f"asset_class must be one of {VALID_ASSET_CLASSES} "
+                f"(got {asset_class!r})"
+            )
+        }
     obj = GroupConfig.objects.filter(asset_class=ac, name=name).first()
     if obj is None:
         return 404, {"detail": f"group '{name}' (asset_class={ac}) not found"}
@@ -1215,33 +1261,36 @@ def delete_group(request, asset_class: str, name: str):
 # ============================================================================ #
 # yfinance returns quoteType values like "EQUITY", "ETF", "MUTUALFUND", "INDEX",
 # "CURRENCY", "CRYPTOCURRENCY". Alpha Vantage SYMBOL_SEARCH returns human-readable
-# strings like "Equity", "ETF", "Mutual Fund". Normalise both into the two
-# buckets the SPA uses (``stocks`` / ``etfs``) for filtering.
+# strings like "Equity", "ETF", "Mutual Fund". Normalise both into the buckets
+# the SPA uses (``stocks`` / ``etfs`` / ``crypto``) for filtering.
 _STOCK_TYPE_TOKENS = {"equity", "stock", "common stock", "mutualfund", "mutual fund"}
 _ETF_TYPE_TOKENS = {"etf", "exchange traded fund", "exchangetradedfund"}
+_CRYPTO_TYPE_TOKENS = {"cryptocurrency", "crypto", "digitalcurrency", "digital currency"}
 
 
 def _matches_asset_class(raw_type: Optional[str], wanted: str) -> bool:
     """Decide whether a search-hit's provider type string belongs to the
-    ``stocks`` or ``etfs`` bucket the UI is asking for."""
+    ``stocks``, ``etfs`` or ``crypto`` bucket the UI is asking for."""
     if not raw_type:
         # Provider didn't tell us -- be permissive (don't drop the hit).
         return True
     token = raw_type.strip().lower().replace("-", "").replace("_", "")
     if wanted == "etfs":
         return token in _ETF_TYPE_TOKENS or "etf" in token
+    if wanted == "crypto":
+        return token in _CRYPTO_TYPE_TOKENS or "crypto" in token
     if wanted == "stocks":
-        # Anything that's not clearly an ETF passes -- equities, mutual funds,
-        # ADRs, etc. Indices/crypto/futures/options/warrants are excluded:
-        # option-chain symbols in particular (e.g. "AAPL260618C00300000") are
-        # extremely noisy in yfinance's Search results.
+        # Anything that's not clearly an ETF / crypto / index / derivative
+        # passes -- equities, mutual funds, ADRs, etc. Option-chain symbols
+        # in particular (e.g. "AAPL260618C00300000") are extremely noisy in
+        # yfinance's Search results.
         if token in _ETF_TYPE_TOKENS or "etf" in token:
+            return False
+        if token in _CRYPTO_TYPE_TOKENS or "crypto" in token:
             return False
         if token in {
             "index",
             "currency",
-            "cryptocurrency",
-            "crypto",
             "future",
             "option",
             "warrant",
@@ -1258,15 +1307,18 @@ def search_instruments(request, q: str, type: Optional[str] = None):
     symbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).
 
     The optional ``type`` parameter filters hits to a single asset class --
-    ``stocks`` (equity + mutual funds) or ``etfs`` -- so the Add-Stock modal can
-    show only ETFs when adding to the ETFs sleeve and the global nav bar can
-    skip non-stock noise."""
+    ``stocks`` (equity + mutual funds), ``etfs`` or ``crypto`` -- so the
+    Add-Stock modal can scope the dropdown and the global nav bar can skip
+    non-stock noise."""
     q = (q or "").strip()
     if len(q) < 2:
         return []
     type_filter = (type or "").strip().lower() or None
-    if type_filter not in (None, "stocks", "etfs"):
-        raise HttpError(400, "type must be 'stocks' or 'etfs'")
+    if type_filter is not None and type_filter not in VALID_ASSET_CLASSES:
+        raise HttpError(
+            400,
+            f"type must be one of {VALID_ASSET_CLASSES} (got {type_filter!r})",
+        )
 
     cache_key = f"search:{get_registry().name}:{type_filter or 'all'}:{q.lower()}"
     cached = cache.get(cache_key)

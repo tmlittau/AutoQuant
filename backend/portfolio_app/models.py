@@ -16,6 +16,7 @@ from django.db import models
 class AssetClass(models.TextChoices):
     STOCKS = "stocks", "Stocks"
     ETFS = "etfs", "ETFs"
+    CRYPTO = "crypto", "Crypto"
 
 
 class HoldingKind(models.TextChoices):

@@ -47,7 +47,14 @@ def build_portfolio_dict(kind: str = HoldingKind.PORTFOLIO) -> dict:
     """Build a YAML-shaped portfolio/watchlist dict from the database.
 
     Output mirrors ``aq.load_portfolio()``: top-level ``base_currency``,
-    ``quote_currency``, ``stocks: {groups: {...}}``, ``etfs: {holdings: [...]}``.
+    ``quote_currency``, plus one section per asset class:
+
+    - ``stocks`` keeps the legacy ``{groups: {...}}`` structure (target
+      weights, descriptions per sector).
+    - ``etfs`` and ``crypto`` use the flat ``{holdings: [...]}`` shape -- no
+      sub-categories, no target weights. Both are pinned to a single
+      canonical group name (``ETFs`` / ``Crypto``) on the Holding row.
+
     Empty sections are included so downstream callers can safely index.
     """
     out: dict[str, Any] = {
@@ -55,6 +62,7 @@ def build_portfolio_dict(kind: str = HoldingKind.PORTFOLIO) -> dict:
         "quote_currency": "USD",
         "stocks": {"groups": {}},
         "etfs": {"holdings": []},
+        "crypto": {"holdings": []},
     }
 
     # Per-group metadata (description, target_weight) keyed by (asset_class, name).
@@ -73,12 +81,17 @@ def build_portfolio_dict(kind: str = HoldingKind.PORTFOLIO) -> dict:
                     if gc.target_weight is not None:
                         groups[h.group]["target_weight"] = float(gc.target_weight)
             groups[h.group]["holdings"].append(holding_dict)
-        else:  # ETF
+        elif h.asset_class == AssetClass.ETFS:
             out["etfs"]["holdings"].append(holding_dict)
+        elif h.asset_class == AssetClass.CRYPTO:
+            out["crypto"]["holdings"].append(holding_dict)
 
     etf_meta = group_meta.get((AssetClass.ETFS, "ETFs"))
     if etf_meta and etf_meta.description:
         out["etfs"]["description"] = etf_meta.description
+    crypto_meta = group_meta.get((AssetClass.CRYPTO, "Crypto"))
+    if crypto_meta and crypto_meta.description:
+        out["crypto"]["description"] = crypto_meta.description
 
     return out
 

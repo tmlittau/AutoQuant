@@ -69,7 +69,12 @@
       Failed to load dashboard: {error}
     </div>
   {:else if dash}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    {@const sleeves = [
+      { key: 'stocks', label: 'Stocks' },
+      { key: 'etfs',   label: 'ETFs'   },
+      { key: 'crypto', label: 'Crypto' },
+    ]}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
       <KpiCard
         label="Combined value"
         value={fmtEUR(dash.combined.value_eur)}
@@ -84,18 +89,15 @@
         delta={`P&L ${fmtEUR(dash.combined.pnl_eur)}`}
         deltaPositive={dash.combined.pnl_eur >= 0}
       />
-      <KpiCard
-        label="Stocks"
-        value={fmtEUR(dash.stocks.value_eur)}
-        delta={fmtPct(dash.stocks.return_pct)}
-        deltaPositive={dash.stocks.return_pct != null ? dash.stocks.return_pct >= 0 : null}
-      />
-      <KpiCard
-        label="ETFs"
-        value={fmtEUR(dash.etfs.value_eur)}
-        delta={fmtPct(dash.etfs.return_pct)}
-        deltaPositive={dash.etfs.return_pct != null ? dash.etfs.return_pct >= 0 : null}
-      />
+      {#each sleeves as s (s.key)}
+        {@const t = dash.by_class?.[s.key] ?? { value_eur: 0, cost_eur: 0, pnl_eur: 0, return_pct: null }}
+        <KpiCard
+          label={s.label}
+          value={fmtEUR(t.value_eur)}
+          delta={fmtPct(t.return_pct)}
+          deltaPositive={t.return_pct != null ? t.return_pct >= 0 : null}
+        />
+      {/each}
     </div>
 
     <section class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">

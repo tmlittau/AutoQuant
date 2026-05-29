@@ -1,23 +1,37 @@
 <script lang="ts">
   /**
    * Portfolio route wrapper. Reads ``router.location`` to decide between the
-   * Stocks and ETFs sub-tabs, then renders the shared <PortfolioView> with the
-   * matching asset class.
+   * Stocks / ETFs / Crypto sub-tabs, then renders the shared <PortfolioView>
+   * with the matching asset class.
    */
   import { link, router } from 'svelte-spa-router';
   import PortfolioView from '../components/PortfolioView.svelte';
 
-  type AssetClass = 'stocks' | 'etfs';
+  type AssetClass = 'stocks' | 'etfs' | 'crypto';
 
   let assetClass = $derived<AssetClass>(
-    router.location.includes('/etfs') ? 'etfs' : 'stocks',
+    router.location.includes('/crypto')
+      ? 'crypto'
+      : router.location.includes('/etfs')
+        ? 'etfs'
+        : 'stocks',
   );
 
   type Tab = { href: string; label: string; key: AssetClass };
   const tabs: Tab[] = [
     { href: '/portfolio/stocks', label: 'Stocks', key: 'stocks' },
     { href: '/portfolio/etfs', label: 'ETFs', key: 'etfs' },
+    { href: '/portfolio/crypto', label: 'Crypto', key: 'crypto' },
   ];
+
+  // Short descriptive subtitle per sleeve.
+  let subtitle = $derived(
+    assetClass === 'stocks'
+      ? 'Sector-grouped equities · target weights enforced'
+      : assetClass === 'etfs'
+        ? 'ETF sleeve · diversified by construction, no group targets'
+        : 'Crypto wallet · priced in EUR · log deposits / withdrawals / swaps',
+  );
 </script>
 
 <div class="space-y-5">
@@ -38,11 +52,7 @@
         </a>
       {/each}
     </nav>
-    <span class="text-xs text-slate-500 ml-auto">
-      {assetClass === 'stocks'
-        ? 'Sector-grouped equities · target weights enforced'
-        : 'ETF sleeve · diversified by construction, no group targets'}
-    </span>
+    <span class="text-xs text-slate-500 ml-auto">{subtitle}</span>
   </header>
 
   <PortfolioView {assetClass} />

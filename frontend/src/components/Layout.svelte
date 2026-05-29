@@ -15,6 +15,7 @@
     { href: '/', label: 'Dashboard', match: /^\/$/ },
     { href: '/portfolio/stocks', label: 'Stocks', match: /^\/portfolio\/stocks/ },
     { href: '/portfolio/etfs', label: 'ETFs', match: /^\/portfolio\/etfs/ },
+    { href: '/portfolio/crypto', label: 'Crypto', match: /^\/portfolio\/crypto/ },
     {
       href: '/portfolio/diversification',
       label: 'Diversification',

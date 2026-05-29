@@ -93,8 +93,12 @@ class Sparkline(Schema):
 
 
 class DashboardOut(Schema):
-    stocks: PortfolioTotals
-    etfs: PortfolioTotals
+    """Cross-sleeve dashboard payload. ``by_class`` is keyed by asset class
+    (stocks / etfs / crypto) so the SPA can render KPI cards by iteration
+    instead of hardcoding sleeves. ``combined`` aggregates every sleeve.
+    """
+
+    by_class: dict[str, PortfolioTotals]
     combined: PortfolioTotals
     sparkline: Sparkline
     top_movers: list[TopMover]

@@ -17,7 +17,7 @@
   import Modal from './Modal.svelte';
 
   type Kind = 'portfolio' | 'watchlist';
-  type AssetClass = 'stocks' | 'etfs';
+  type AssetClass = 'stocks' | 'etfs' | 'crypto';
 
   type SymbolHit = {
     symbol: string;
@@ -207,6 +207,11 @@
       group = 'ETFs';
       return;
     }
+    if (ac === 'crypto') {
+      availableGroups = ['Crypto'];
+      group = 'Crypto';
+      return;
+    }
     (async () => {
       try {
         const [pf, wl] = await Promise.all([
@@ -332,7 +337,13 @@
       return;
     }
     const finalGroup =
-      assetClass === 'etfs' ? 'ETFs' : creatingNewGroup ? newGroupName.trim() : group;
+      assetClass === 'etfs'
+        ? 'ETFs'
+        : assetClass === 'crypto'
+          ? 'Crypto'
+          : creatingNewGroup
+            ? newGroupName.trim()
+            : group;
     if (!finalGroup) {
       error = 'Pick or enter a group';
       return;
@@ -384,7 +395,11 @@
     !submitting &&
       !!ticker.trim() &&
       !!name.trim() &&
+      // ETFs and Crypto are pinned to a single canonical group, so any
+      // selection passes. Stocks must have a real group set (or be in
+      // "+ New group" mode with a non-empty name).
       (assetClass === 'etfs' ||
+        assetClass === 'crypto' ||
         (creatingNewGroup ? !!newGroupName.trim() : !!group)),
   );
 </script>
@@ -410,7 +425,7 @@
       <div>
         <span class="block text-xs font-medium text-slate-700 mb-1">Asset class</span>
         <div class="inline-flex rounded-md border border-slate-200 p-0.5 bg-slate-50">
-          {#each ['stocks', 'etfs'] as a}
+          {#each ['stocks', 'etfs', 'crypto'] as a}
             <button
               type="button"
               onclick={() => (assetClass = a as AssetClass)}
@@ -577,10 +592,19 @@
           </div>
         {/if}
       </div>
-    {:else}
+    {:else if assetClass === 'etfs'}
       <div class="text-xs text-slate-500">
         ETFs are tracked in their own flat sleeve (group =
         <span class="font-mono">ETFs</span>).
+      </div>
+    {:else}
+      <div class="text-xs text-slate-500">
+        Crypto coins are tracked in their own flat sleeve (group =
+        <span class="font-mono">Crypto</span>).
+        For European-friendly pricing prefer EUR pairs (e.g.
+        <span class="font-mono">BTC-EUR</span>,
+        <span class="font-mono">ETH-EUR</span>) -- the FX leg collapses to a
+        no-op and the ledger stores cost basis directly in EUR.
       </div>
     {/if}
 

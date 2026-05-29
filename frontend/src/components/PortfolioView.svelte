@@ -18,8 +18,13 @@
   import GroupManagerModal from './GroupManagerModal.svelte';
   import { fmtEUR, fmtLocal, fmtNum, fmtPct } from '../lib/format';
 
-  type Props = { assetClass: 'stocks' | 'etfs' };
+  type Props = { assetClass: 'stocks' | 'etfs' | 'crypto' };
   let { assetClass }: Props = $props();
+
+  // Both ETFs and Crypto are flat sleeves -- no sub-groups, no signals
+  // scoring, simpler chart set. The two render identically; gate every
+  // "is this stocks?" branch on a single derived flag.
+  let isFlatSleeve = $derived(assetClass !== 'stocks');
 
   // Loaded payloads.
   let snap = $state<any>(null);
@@ -106,11 +111,12 @@
   // -------------------------------------------------------------------------
 
   // Allocation chart: sunburst (group → holding) for stocks, flat donut by
-  // ticker for ETFs. ETFs all share the single "ETFs" group so the sunburst
-  // collapses to a wedge -- a donut by ticker is more informative.
+  // ticker for the flat sleeves (ETFs and Crypto). The flat sleeves share a
+  // single canonical group so the sunburst would collapse to a wedge -- a
+  // donut by ticker is more informative.
   let sunburstData = $derived.by(() => {
     if (!snap || snap.positions.length === 0) return [];
-    if (assetClass === 'etfs') {
+    if (isFlatSleeve) {
       return [
         {
           type: 'pie',
@@ -389,8 +395,11 @@
     </div>
   {:else if snap && snap.positions.length === 0}
     <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-sm">
-      No {assetClass} holdings yet. Add one from the <strong>Add Stock</strong> flow
-      (coming in Phase 6) or directly in the Django admin for now.
+      No {assetClass} holdings yet. Tap
+      <strong>
+        {#if assetClass === 'crypto'}+ Add Coin{:else if assetClass === 'etfs'}+ Add ETF{:else}+ Add Stock{/if}
+      </strong>
+      to add one.
     </div>
   {:else if snap}
     <!-- Action bar: stacks full-width on mobile, inline on desktop. -->
@@ -414,7 +423,7 @@
         onclick={() => (addStockOpen = true)}
         class="w-full sm:w-auto px-4 py-2 min-h-[44px] text-sm border border-slate-300 rounded-md hover:bg-slate-50"
       >
-        {#if assetClass === 'etfs'}+ Add ETF{:else}+ Add Stock{/if}
+        {#if assetClass === 'crypto'}+ Add Coin{:else if assetClass === 'etfs'}+ Add ETF{:else}+ Add Stock{/if}
       </button>
       <button
         type="button"

@@ -19,6 +19,7 @@
     '/portfolio': Portfolio,
     '/portfolio/stocks': Portfolio,
     '/portfolio/etfs': Portfolio,
+    '/portfolio/crypto': Portfolio,
     '/portfolio/diversification': Diversification,
     '/watchlist': Watchlist,
     '/transactions': Transactions,

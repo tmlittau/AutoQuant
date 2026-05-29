@@ -38,6 +38,7 @@ DEFAULT_LEDGER_PATH = PROJECT_ROOT / "data" / "transactions.csv"
 
 # Group label used for ETF holdings (which are not sub-grouped in the YAML).
 ETF_GROUP_LABEL = "ETFs"
+CRYPTO_GROUP_LABEL = "Crypto"
 
 TRANSACTION_COLUMNS = [
     "date",
@@ -86,6 +87,15 @@ def _etfs_section(portfolio: dict) -> dict:
     return portfolio.get("etfs") or {}
 
 
+def _crypto_section(portfolio: dict) -> dict:
+    """Crypto sleeve: same flat ``{holdings: [...]}`` shape as ETFs.
+
+    A coin is identified by its Yahoo pair (e.g. ``BTC-EUR``, ``ETH-EUR``).
+    The ledger prices every event in EUR; for native EUR pairs that means
+    ``eur_per_local == 1.0`` and the FX leg collapses to a no-op."""
+    return portfolio.get("crypto") or {}
+
+
 def _iter_holdings(
     portfolio: dict,
     asset_class: str = "stocks",
@@ -100,6 +110,9 @@ def _iter_holdings(
     if asset_class in ("etfs", "all"):
         for h in _etfs_section(portfolio).get("holdings", []) or []:
             yield ETF_GROUP_LABEL, h
+    if asset_class in ("crypto", "all"):
+        for h in _crypto_section(portfolio).get("holdings", []) or []:
+            yield CRYPTO_GROUP_LABEL, h
 
 
 def all_tickers(portfolio: dict, asset_class: str = "stocks") -> list[str]:

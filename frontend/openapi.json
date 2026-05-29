@@ -1114,7 +1114,7 @@
             }
           }
         },
-        "description": "Resolve a company name or partial ticker through the active adapter's\nsymbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).\n\nThe optional ``type`` parameter filters hits to a single asset class --\n``stocks`` (equity + mutual funds) or ``etfs`` -- so the Add-Stock modal can\nshow only ETFs when adding to the ETFs sleeve and the global nav bar can\nskip non-stock noise.",
+        "description": "Resolve a company name or partial ticker through the active adapter's\nsymbol-search endpoint (yfinance ``Search`` or Alpha Vantage ``SYMBOL_SEARCH``).\n\nThe optional ``type`` parameter filters hits to a single asset class --\n``stocks`` (equity + mutual funds), ``etfs`` or ``crypto`` -- so the\nAdd-Stock modal can scope the dropdown and the global nav bar can skip\nnon-stock noise.",
         "tags": [
           "instruments"
         ],
@@ -2021,12 +2021,14 @@
         "type": "object"
       },
       "DashboardOut": {
+        "description": "Cross-sleeve dashboard payload. ``by_class`` is keyed by asset class\n(stocks / etfs / crypto) so the SPA can render KPI cards by iteration\ninstead of hardcoding sleeves. ``combined`` aggregates every sleeve.",
         "properties": {
-          "stocks": {
-            "$ref": "#/components/schemas/PortfolioTotals"
-          },
-          "etfs": {
-            "$ref": "#/components/schemas/PortfolioTotals"
+          "by_class": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PortfolioTotals"
+            },
+            "title": "By Class",
+            "type": "object"
           },
           "combined": {
             "$ref": "#/components/schemas/PortfolioTotals"
@@ -2046,8 +2048,7 @@
           }
         },
         "required": [
-          "stocks",
-          "etfs",
+          "by_class",
           "combined",
           "sparkline",
           "top_movers",
