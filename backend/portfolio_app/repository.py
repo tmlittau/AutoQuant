@@ -110,3 +110,20 @@ def _to_decimal(value: Any) -> Optional[Decimal]:
     if isinstance(value, float) and pd.isna(value):
         return None
     return Decimal(str(value))
+
+
+def infer_asset_class(group_name: str) -> str:
+    """Heuristic used by the CSV import endpoint to guess the asset_class for
+    a Holding it has to auto-create. Matches the convention already encoded in
+    the import_legacy command and the YAML schema:
+
+    - ``"ETFs"`` (case-insensitive) -> etfs
+    - ``"Crypto"`` (or any group ending in "/Crypto") -> crypto
+    - everything else -> stocks (sector-style group names)
+    """
+    g = (group_name or "").strip().lower()
+    if g == "etfs":
+        return "etfs"
+    if g == "crypto" or g.endswith("/crypto"):
+        return "crypto"
+    return "stocks"

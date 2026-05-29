@@ -238,6 +238,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/transactions/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Transactions
+         * @description Restore transactions from the CSV emitted by ``/transactions/export``.
+         *
+         *     Accepted multipart upload (``file=transactions.csv``). Query params:
+         *
+         *     - ``mode=append`` (default): add new rows, skip duplicates that match
+         *       ``(date, ticker, action, amount_eur, shares)``.
+         *     - ``mode=replace``: delete every existing Transaction first, then insert.
+         *       Holdings + GroupConfig are preserved.
+         *     - ``strict=true`` (default): if any row fails validation, abort the whole
+         *       import and return 422 with the error list (DB untouched).
+         *     - ``strict=false``: commit valid rows, list rejected rows in the response.
+         *
+         *     Missing Holdings are auto-created from the CSV: ``asset_class`` is inferred
+         *     from the ``group`` column (``ETFs`` -> etfs, ``Crypto`` -> crypto, else
+         *     stocks), ``kind`` defaults to ``portfolio``, ``currency`` is taken from the
+         *     row's ``listing_currency``, and ``name`` falls back to the ticker (rename
+         *     later in the SPA).
+         */
+        post: operations["portfolio_app_api_import_transactions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/transactions/{tx_id}": {
         parameters: {
             query?: never;
@@ -829,6 +865,40 @@ export interface components {
             note: string;
         };
         /**
+         * ImportResultOut
+         * @description Summary returned by ``POST /api/transactions/import``.
+         *
+         *     Always 200 unless validation aborted before any DB write happened (in
+         *     which case the endpoint returns 400 + ErrorOut). In ``strict=true`` mode
+         *     a single bad row rolls everything back: ``imported=0`` and the errors
+         *     list explains why. In ``strict=false`` mode bad rows are skipped and
+         *     listed but valid rows still commit.
+         */
+        ImportResultOut: {
+            /** Mode */
+            mode: string;
+            /** Imported */
+            imported: number;
+            /** Skipped */
+            skipped: number;
+            /** Errors */
+            errors: components["schemas"]["RowImportError"][];
+            /** Holdings Created */
+            holdings_created: string[];
+            /** Strict */
+            strict: boolean;
+        };
+        /**
+         * RowImportError
+         * @description One bad row, surfaced by ``POST /api/transactions/import``.
+         */
+        RowImportError: {
+            /** Row Index */
+            row_index: number;
+            /** Message */
+            message: string;
+        };
+        /**
          * TransactionPatch
          * @description Body for ``PATCH /api/transactions/{id}``. Only mutable fields.
          */
@@ -1386,6 +1456,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    portfolio_app_api_import_transactions: {
+        parameters: {
+            query?: {
+                mode?: string;
+                strict?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * File
+                     * Format: binary
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultOut"];
+                };
             };
         };
     };

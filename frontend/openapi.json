@@ -552,6 +552,96 @@
         ]
       }
     },
+    "/api/transactions/import": {
+      "post": {
+        "operationId": "portfolio_app_api_import_transactions",
+        "summary": "Import Transactions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mode",
+            "schema": {
+              "default": "append",
+              "title": "Mode",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "strict",
+            "schema": {
+              "default": true,
+              "title": "Strict",
+              "type": "boolean"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Restore transactions from the CSV emitted by ``/transactions/export``.\n\nAccepted multipart upload (``file=transactions.csv``). Query params:\n\n- ``mode=append`` (default): add new rows, skip duplicates that match\n  ``(date, ticker, action, amount_eur, shares)``.\n- ``mode=replace``: delete every existing Transaction first, then insert.\n  Holdings + GroupConfig are preserved.\n- ``strict=true`` (default): if any row fails validation, abort the whole\n  import and return 422 with the error list (DB untouched).\n- ``strict=false``: commit valid rows, list rejected rows in the response.\n\nMissing Holdings are auto-created from the CSV: ``asset_class`` is inferred\nfrom the ``group`` column (``ETFs`` -> etfs, ``Crypto`` -> crypto, else\nstocks), ``kind`` defaults to ``portfolio``, ``currency`` is taken from the\nrow's ``listing_currency``, and ``name`` falls back to the ticker (rename\nlater in the SPA).",
+        "tags": [
+          "transactions"
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "title": "File",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "title": "FileParams",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/transactions/{tx_id}": {
       "patch": {
         "operationId": "portfolio_app_api_update_transaction",
@@ -2299,6 +2389,70 @@
           "amount_eur"
         ],
         "title": "TransactionCreate",
+        "type": "object"
+      },
+      "ImportResultOut": {
+        "description": "Summary returned by ``POST /api/transactions/import``.\n\nAlways 200 unless validation aborted before any DB write happened (in\nwhich case the endpoint returns 400 + ErrorOut). In ``strict=true`` mode\na single bad row rolls everything back: ``imported=0`` and the errors\nlist explains why. In ``strict=false`` mode bad rows are skipped and\nlisted but valid rows still commit.",
+        "properties": {
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/RowImportError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "holdings_created": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Holdings Created",
+            "type": "array"
+          },
+          "strict": {
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "imported",
+          "skipped",
+          "errors",
+          "holdings_created",
+          "strict"
+        ],
+        "title": "ImportResultOut",
+        "type": "object"
+      },
+      "RowImportError": {
+        "description": "One bad row, surfaced by ``POST /api/transactions/import``.",
+        "properties": {
+          "row_index": {
+            "title": "Row Index",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row_index",
+          "message"
+        ],
+        "title": "RowImportError",
         "type": "object"
       },
       "TransactionPatch": {

@@ -8,6 +8,7 @@
   import { api, apiGet } from '../lib/api';
   import { transactionsRevision } from '../lib/stores';
   import AddInvestmentModal from '../components/AddInvestmentModal.svelte';
+  import ImportCsvModal from '../components/ImportCsvModal.svelte';
   import { fmtEUR, fmtDate, fmtLocal, fmtNum } from '../lib/format';
 
   type Tx = {
@@ -32,6 +33,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let modalOpen = $state(false);
+  let importOpen = $state(false);
 
   // Inline edit state
   let editingId = $state<number | null>(null);
@@ -136,7 +138,7 @@
   <header class="flex flex-wrap items-baseline gap-3">
     <h1 class="text-2xl font-semibold text-slate-900">Transactions</h1>
     <span class="text-sm text-slate-500">{rows.length} rows</span>
-    <div class="ml-auto flex gap-2">
+    <div class="ml-auto flex flex-wrap gap-2">
       <a
         href="/api/transactions/export"
         target="_blank"
@@ -145,6 +147,14 @@
       >
         Export CSV
       </a>
+      <button
+        type="button"
+        onclick={() => (importOpen = true)}
+        class="inline-flex items-center px-4 py-2 min-h-[44px] text-sm border border-slate-300 rounded-md hover:bg-slate-50"
+        title="Restore from a CSV (same shape as the Export download)"
+      >
+        Import CSV
+      </button>
       <button
         type="button"
         onclick={() => (modalOpen = true)}
@@ -409,4 +419,9 @@
   open={modalOpen}
   onClose={() => (modalOpen = false)}
   {holdings}
+/>
+
+<ImportCsvModal
+  open={importOpen}
+  onClose={() => (importOpen = false)}
 />

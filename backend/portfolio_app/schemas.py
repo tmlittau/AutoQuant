@@ -140,6 +140,34 @@ class TransactionPatch(Schema):
 
 
 # --------------------------------------------------------------------------- #
+# CSV import
+# --------------------------------------------------------------------------- #
+class RowImportError(Schema):
+    """One bad row, surfaced by ``POST /api/transactions/import``."""
+
+    row_index: int           # 0-based, excluding the header row
+    message: str
+
+
+class ImportResultOut(Schema):
+    """Summary returned by ``POST /api/transactions/import``.
+
+    Always 200 unless validation aborted before any DB write happened (in
+    which case the endpoint returns 400 + ErrorOut). In ``strict=true`` mode
+    a single bad row rolls everything back: ``imported=0`` and the errors
+    list explains why. In ``strict=false`` mode bad rows are skipped and
+    listed but valid rows still commit.
+    """
+
+    mode: str                          # 'append' or 'replace'
+    imported: int                      # rows successfully inserted
+    skipped: int                       # rows skipped (dedup in append mode)
+    errors: list[RowImportError]
+    holdings_created: list[str]        # newly-auto-created holding tickers
+    strict: bool                       # echoes the flag the caller used
+
+
+# --------------------------------------------------------------------------- #
 # Holdings + Groups (mutating)
 # --------------------------------------------------------------------------- #
 class HoldingCreate(Schema):

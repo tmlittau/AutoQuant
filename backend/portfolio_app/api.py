@@ -23,8 +23,9 @@ from django.contrib.auth import logout as django_logout
 from django.core.cache import cache
 from django.db import transaction as db_transaction
 from django.http import HttpResponse
-from ninja import NinjaAPI, Query
+from ninja import File, NinjaAPI, Query
 from ninja.errors import HttpError
+from ninja.files import UploadedFile
 from ninja.security import django_auth
 
 import autoquant as aq
@@ -48,6 +49,8 @@ from .schemas import (
     GroupCreate,
     GroupOut,
     GroupPatch,
+    ImportResultOut,
+    RowImportError,
     LoginIn,
     MeOut,
     GroupSummary,
@@ -598,6 +601,194 @@ def export_transactions(request):
     resp = HttpResponse(csv_text, content_type="text/csv")
     resp["Content-Disposition"] = 'attachment; filename="transactions.csv"'
     return resp
+
+
+@api.post(
+    "/transactions/import",
+    response={200: ImportResultOut, 400: ErrorOut, 422: ImportResultOut},
+    tags=["transactions"],
+)
+def import_transactions(
+    request,
+    file: UploadedFile = File(...),
+    mode: str = "append",
+    strict: bool = True,
+):
+    """Restore transactions from the CSV emitted by ``/transactions/export``.
+
+    Accepted multipart upload (``file=transactions.csv``). Query params:
+
+    - ``mode=append`` (default): add new rows, skip duplicates that match
+      ``(date, ticker, action, amount_eur, shares)``.
+    - ``mode=replace``: delete every existing Transaction first, then insert.
+      Holdings + GroupConfig are preserved.
+    - ``strict=true`` (default): if any row fails validation, abort the whole
+      import and return 422 with the error list (DB untouched).
+    - ``strict=false``: commit valid rows, list rejected rows in the response.
+
+    Missing Holdings are auto-created from the CSV: ``asset_class`` is inferred
+    from the ``group`` column (``ETFs`` -> etfs, ``Crypto`` -> crypto, else
+    stocks), ``kind`` defaults to ``portfolio``, ``currency`` is taken from the
+    row's ``listing_currency``, and ``name`` falls back to the ticker (rename
+    later in the SPA).
+    """
+    from io import BytesIO
+
+    if mode not in ("append", "replace"):
+        raise HttpError(400, "mode must be 'append' or 'replace'")
+
+    expected_cols = list(pf.TRANSACTION_COLUMNS)
+
+    try:
+        df = pd.read_csv(BytesIO(file.read()), dtype=str)
+    except Exception as e:
+        raise HttpError(400, f"could not parse CSV: {e}")
+
+    if list(df.columns) != expected_cols:
+        missing = [c for c in expected_cols if c not in df.columns]
+        extra = [c for c in df.columns if c not in expected_cols]
+        bits = []
+        if missing:
+            bits.append(f"missing columns: {missing}")
+        if extra:
+            bits.append(f"unexpected columns: {extra}")
+        raise HttpError(
+            400,
+            "CSV header does not match the export format. "
+            + " ; ".join(bits)
+            + f". Expected order: {expected_cols}",
+        )
+
+    # ---- row-level validation + coercion -----------------------------------
+    valid_rows: list[dict] = []
+    errors: list[dict] = []
+    for i, raw in df.iterrows():
+        try:
+            action = str(raw["action"]).strip().lower()
+            if action not in ("buy", "sell"):
+                raise ValueError(f"action must be 'buy' or 'sell' (got {action!r})")
+            date_val = pd.to_datetime(raw["date"]).date()
+            row = {
+                "date": date_val,
+                "ticker": str(raw["ticker"]).strip(),
+                "group": str(raw["group"]).strip(),
+                "action": action,
+                "amount_eur": repo._to_decimal(raw["amount_eur"]) or Decimal("0"),
+                "price_local": repo._to_decimal(raw["price_local"]) or Decimal("0"),
+                "listing_currency": str(raw["listing_currency"]).strip().upper(),
+                "eur_per_local": repo._to_decimal(raw["eur_per_local"]) or Decimal("1"),
+                "shares": repo._to_decimal(raw["shares"]) or Decimal("0"),
+                "fee_eur": repo._to_decimal(raw.get("fee_eur") or 0) or Decimal("0"),
+                "note": str(raw.get("note") or "") if not pd.isna(raw.get("note")) else "",
+            }
+            if not row["ticker"]:
+                raise ValueError("ticker is empty")
+            valid_rows.append(row)
+        except Exception as e:
+            errors.append({"row_index": int(i), "message": str(e)})
+
+    # If we're strict and any row failed -> 422, no DB changes.
+    if strict and errors:
+        return 422, {
+            "mode": mode,
+            "imported": 0,
+            "skipped": 0,
+            "errors": errors,
+            "holdings_created": [],
+            "strict": strict,
+        }
+
+    # ---- DB mutations (atomic) --------------------------------------------
+    imported = 0
+    skipped = 0
+    holdings_created: list[str] = []
+
+    with db_transaction.atomic():
+        if mode == "replace":
+            Transaction.objects.all().delete()
+
+        # Pre-existing Holdings so we know which tickers need auto-create.
+        existing_tickers = set(
+            Holding.objects.filter(kind=HoldingKind.PORTFOLIO).values_list(
+                "ticker", flat=True
+            )
+        )
+
+        # Index of existing rows for append-mode dedup.
+        existing_keys: set[tuple] = set()
+        if mode == "append":
+            for tx in Transaction.objects.values(
+                "date", "ticker", "action", "amount_eur", "shares"
+            ):
+                existing_keys.add(
+                    (
+                        tx["date"],
+                        tx["ticker"],
+                        tx["action"],
+                        tx["amount_eur"],
+                        tx["shares"],
+                    )
+                )
+
+        for row in valid_rows:
+            # Auto-create Holding (+ GroupConfig) if the ticker is unknown.
+            if row["ticker"] not in existing_tickers:
+                asset_class = repo.infer_asset_class(row["group"])
+                GroupConfig.objects.get_or_create(
+                    asset_class=asset_class,
+                    name=row["group"],
+                    defaults={"description": ""},
+                )
+                Holding.objects.create(
+                    kind=HoldingKind.PORTFOLIO,
+                    asset_class=asset_class,
+                    group=row["group"],
+                    ticker=row["ticker"],
+                    name=row["ticker"],   # placeholder; user renames in the SPA
+                    currency=row["listing_currency"] or "USD",
+                )
+                existing_tickers.add(row["ticker"])
+                holdings_created.append(row["ticker"])
+
+            if mode == "append":
+                key = (
+                    row["date"],
+                    row["ticker"],
+                    row["action"],
+                    row["amount_eur"],
+                    row["shares"],
+                )
+                if key in existing_keys:
+                    skipped += 1
+                    continue
+                existing_keys.add(key)
+
+            Transaction.objects.create(**row)
+            imported += 1
+
+    audit(
+        request,
+        "/transactions/import",
+        "POST",
+        {
+            "mode": mode,
+            "strict": strict,
+            "imported": imported,
+            "skipped": skipped,
+            "errors": len(errors),
+            "holdings_created": holdings_created,
+            "filename": file.name,
+        },
+    )
+
+    return 200, {
+        "mode": mode,
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors,
+        "holdings_created": holdings_created,
+        "strict": strict,
+    }
 
 
 def _tx_to_dict(t: Transaction) -> dict:
