@@ -44,7 +44,9 @@ from .schemas import (
     AdapterStatus,
     DashboardOut,
     DiversificationOut,
+    EstimateProceedsOut,
     EstimateSharesOut,
+    HoldingPositionOut,
     ErrorOut,
     GroupCreate,
     GroupOut,
@@ -815,14 +817,30 @@ def _tx_to_dict(t: Transaction) -> dict:
     tags=["transactions"],
 )
 def create_transaction(request, body: TransactionCreate):
-    """Log a buy or sell. The backend estimates ``shares``, ``price_local``
-    and ``eur_per_local`` from EOD market data on ``date`` (so the SPA only
-    needs to send the EUR amount and date)."""
-    if body.amount_eur <= 0:
-        return 400, {"detail": "amount_eur must be > 0"}
+    """Log a buy or sell. The caller submits **either** ``amount_eur`` (we
+    compute shares from the EOD close + FX on ``date``) **or** ``shares``
+    (we compute the EUR proceeds from the same EOD data). Either way the
+    sign convention on disk is positive for buy / negative for sell.
+    """
     action = (body.action or "buy").lower()
     if action not in ("buy", "sell"):
         return 400, {"detail": "action must be 'buy' or 'sell'"}
+
+    # Exactly one of amount_eur / shares must be set, and it must be
+    # positive. The sign comes from `action`.
+    has_amount = body.amount_eur is not None
+    has_shares = body.shares is not None
+    if has_amount == has_shares:
+        return 400, {
+            "detail": (
+                "Provide exactly one of amount_eur or shares -- "
+                "amount_eur for EUR-mode entry, shares for units-mode entry."
+            )
+        }
+    if has_amount and body.amount_eur <= 0:
+        return 400, {"detail": "amount_eur must be > 0"}
+    if has_shares and body.shares <= 0:
+        return 400, {"detail": "shares must be > 0"}
 
     ticker = body.ticker.strip().upper() if body.ticker else ""
     if not ticker:
@@ -849,9 +867,26 @@ def create_transaction(request, body: TransactionCreate):
     listing_currency = (body.listing_currency or holding.currency or "USD").upper()
 
     try:
-        est = pf.estimate_shares(
-            adapter, ticker, trade_date, body.amount_eur, listing_currency=listing_currency
-        )
+        if has_amount:
+            # EUR -> shares. Existing path, unchanged.
+            est = pf.estimate_shares(
+                adapter, ticker, trade_date, body.amount_eur,
+                listing_currency=listing_currency,
+            )
+            absolute_eur = float(body.amount_eur)
+            absolute_shares = float(est["shares"])
+        else:
+            # shares -> EUR (units-mode sell, or buy by share count).
+            # estimate_shares with a sentinel EUR of 1.0 cheaply recovers
+            # price_local + eur_per_local on the trade date, then we
+            # back out the EUR proceeds for the user's share count.
+            est = pf.estimate_shares(
+                adapter, ticker, trade_date, 1.0,
+                listing_currency=listing_currency,
+            )
+            price_eur = est["price_local"] * est["eur_per_local"]
+            absolute_shares = float(body.shares)
+            absolute_eur = absolute_shares * price_eur
     except DataUnavailableError as e:
         return 400, {"detail": f"price unavailable: {e}"}
 
@@ -861,11 +896,11 @@ def create_transaction(request, body: TransactionCreate):
         ticker=ticker,
         group=holding.group,
         action=action,
-        amount_eur=Decimal(str(body.amount_eur)) * sign,
+        amount_eur=Decimal(str(absolute_eur)) * sign,
         price_local=Decimal(str(est["price_local"])),
         listing_currency=est["listing_currency"],
         eur_per_local=Decimal(str(est["eur_per_local"])),
-        shares=Decimal(str(est["shares"])) * sign,
+        shares=Decimal(str(absolute_shares)) * sign,
         fee_eur=Decimal(str(body.fee_eur or 0)),
         note=body.note or "",
     )
@@ -1371,6 +1406,64 @@ def estimate_shares(
         "eur_per_local": float(est["eur_per_local"]),
         "shares": float(est["shares"]),
         "price_eur": float(est["price_local"]) * float(est["eur_per_local"]),
+    }
+
+
+@api.get(
+    "/instruments/{ticker}/estimate-proceeds",
+    response=EstimateProceedsOut,
+    tags=["instruments"],
+)
+def estimate_proceeds(
+    request,
+    ticker: str,
+    shares: float,
+    on: date = Query(..., description="Trade date"),
+    listing_currency: str = "USD",
+):
+    """Mirror of estimate-shares but units -> EUR. Powers the sell modal's
+    live preview when the user enters share count instead of EUR amount.
+    """
+    if shares <= 0:
+        raise HttpError(400, "shares must be > 0")
+    adapter = get_registry().adapter
+    est = pf.estimate_shares(adapter, ticker, on, 1.0, listing_currency=listing_currency)
+    price_eur = float(est["price_local"]) * float(est["eur_per_local"])
+    return {
+        "ticker": ticker,
+        "date": on.isoformat(),
+        "shares": float(shares),
+        "price_local": float(est["price_local"]),
+        "listing_currency": est["listing_currency"],
+        "eur_per_local": float(est["eur_per_local"]),
+        "amount_eur": float(shares) * price_eur,
+        "price_eur": price_eur,
+    }
+
+
+@api.get(
+    "/holdings/{ticker}/position",
+    response=HoldingPositionOut,
+    tags=["holdings"],
+)
+def get_holding_position(request, ticker: str):
+    """Return the current net position (signed share count + cumulative EUR
+    cost basis) for ``ticker``. Powers:
+
+      * "Sell all" prefill in the Add-Investment modal,
+      * the conditional "+ Log sell" button on the Stock single-page view
+        (only rendered when shares > 0).
+
+    Returns 0/0 when the ticker has no Transaction rows -- callers should
+    not treat that as a 404 (a brand-new holding without an initial buy
+    has the same shape and should still surface in the SPA).
+    """
+    sym = (ticker or "").strip().upper()
+    shares, cost = repo.get_current_position(sym)
+    return {
+        "ticker": sym,
+        "shares": float(shares),
+        "cost_eur": float(cost),
     }
 
 

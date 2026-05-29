@@ -10,9 +10,10 @@
    */
   import { apiGet } from '../lib/api';
   import { isMobile, pickHeight, pickMargin } from '../lib/responsive';
-  import { pricesRevision } from '../lib/stores';
+  import { pricesRevision, transactionsRevision } from '../lib/stores';
   import PlotlyChart from '../lib/PlotlyChart.svelte';
   import AddStockModal from '../components/AddStockModal.svelte';
+  import AddInvestmentModal from '../components/AddInvestmentModal.svelte';
   import { fmtPct, fmtNum, fmtDate, fmtLocal } from '../lib/format';
 
   type Props = { params?: { ticker?: string } };
@@ -68,6 +69,11 @@
     currency: string;
   } | null>(null);
 
+  // Sell modal: only surfaces if the user has a non-zero position. Reuses
+  // the existing AddInvestmentModal with initialAction='sell'.
+  let sellOpen = $state(false);
+  let position = $state<{ shares: number; cost_eur: number } | null>(null);
+
   function openAdd(kind: 'portfolio' | 'watchlist') {
     modalInitial = {
       kind,
@@ -77,6 +83,38 @@
     };
     modalOpen = true;
   }
+
+  // Single-holding payload the modal expects.
+  let sellHoldings = $derived(
+    ticker && position
+      ? [
+          {
+            ticker,
+            name: searchHit?.name ?? ticker,
+            currency: searchHit?.currency ?? 'USD',
+            group: '',  // not used by the modal's submit path
+          },
+        ]
+      : [],
+  );
+
+  // Fetch the current position whenever the ticker changes (or a
+  // transaction lands) so the "+ Log sell" button knows whether to render.
+  $effect(() => {
+    const t = ticker;
+    const _txRev = $transactionsRevision;
+    if (!t) {
+      position = null;
+      return;
+    }
+    apiGet('/api/holdings/{ticker}/position', { params: { path: { ticker: t } } })
+      .then((r: any) => {
+        position = { shares: r.shares ?? 0, cost_eur: r.cost_eur ?? 0 };
+      })
+      .catch(() => {
+        position = null;
+      });
+  });
 
   async function loadAll(t: string, r: string) {
     loading = true;
@@ -383,6 +421,14 @@
         onclick={() => openAdd('portfolio')}
         class="px-4 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
       >+ Add to Portfolio</button>
+      {#if position && position.shares > 0}
+        <button
+          type="button"
+          onclick={() => (sellOpen = true)}
+          class="px-4 py-2 min-h-[44px] text-sm bg-red-600 text-white rounded-md hover:bg-red-700"
+          title={`You hold ${position.shares.toFixed(4)} ${ticker}`}
+        >− Log sell</button>
+      {/if}
       <button
         type="button"
         onclick={() => openAdd('watchlist')}
@@ -496,4 +542,12 @@
   open={modalOpen}
   onClose={() => (modalOpen = false)}
   initial={modalInitial ?? undefined}
+/>
+
+<AddInvestmentModal
+  open={sellOpen}
+  onClose={() => (sellOpen = false)}
+  holdings={sellHoldings}
+  initialTicker={ticker}
+  initialAction="sell"
 />

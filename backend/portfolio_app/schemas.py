@@ -120,13 +120,24 @@ class TransactionOut(Schema):
 
 
 class TransactionCreate(Schema):
-    """Body for ``POST /api/transactions``. Backend estimates ``shares``,
-    ``price_local`` and ``eur_per_local`` from EOD data on ``date``."""
+    """Body for ``POST /api/transactions``.
+
+    Caller must set **exactly one** of ``amount_eur`` or ``shares``:
+
+    - ``amount_eur`` (legacy buy / EUR-mode sell): backend looks up the
+      EOD close + FX on ``date`` and computes ``shares``.
+    - ``shares`` (units-mode sell or buy by share count): backend looks up
+      the EOD close + FX on ``date`` and computes ``amount_eur``.
+
+    The frontend's sign convention: always positive. The endpoint flips the
+    sign on disk for sells.
+    """
 
     date: str                                # ISO YYYY-MM-DD
     ticker: str
     action: str = "buy"                      # 'buy' or 'sell'
-    amount_eur: float                        # positive; sign added server-side
+    amount_eur: Optional[float] = None       # positive; one-of with shares
+    shares: Optional[float] = None           # positive; one-of with amount_eur
     listing_currency: str = "USD"
     fee_eur: float = 0.0
     note: str = ""
@@ -304,6 +315,32 @@ class EstimateSharesOut(Schema):
     eur_per_local: float
     shares: float
     price_eur: float
+
+
+class EstimateProceedsOut(Schema):
+    """Mirror of EstimateSharesOut but in the units -> EUR direction. Powers
+    the sell modal's live preview when the user enters share count instead
+    of EUR amount."""
+
+    ticker: str
+    date: str
+    shares: float
+    price_local: float
+    listing_currency: str
+    eur_per_local: float
+    amount_eur: float
+    price_eur: float
+
+
+class HoldingPositionOut(Schema):
+    """Current net position for one ticker. Returned by
+    ``GET /api/holdings/{ticker}/position`` so the sell modal can populate
+    "Sell all" and the Stock page can hide its "+ Log sell" button when
+    there's nothing to sell."""
+
+    ticker: str
+    shares: float
+    cost_eur: float                 # cumulative cost basis on the held shares
 
 
 # --------------------------------------------------------------------------- #

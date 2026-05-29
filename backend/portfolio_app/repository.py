@@ -112,6 +112,31 @@ def _to_decimal(value: Any) -> Optional[Decimal]:
     return Decimal(str(value))
 
 
+def get_current_position(ticker: str) -> tuple[Decimal, Decimal]:
+    """Return ``(net_shares, net_cost_eur)`` for ``ticker`` summing every
+    Transaction row. Signs are preserved (buys positive, sells negative)
+    so a long position has positive shares, a sold-out one has 0, and
+    something that's been over-sold has negative (an error in the user's
+    ledger but the math is honest).
+
+    Used by:
+      * the "Sell all" shortcut in the Add-Investment modal,
+      * the "+ Log sell" affordance on the Stock single-page view (only
+        shown when net_shares > 0),
+      * the future sell endpoint when shares are submitted instead of EUR.
+    """
+    from django.db.models import Sum
+
+    agg = Transaction.objects.filter(ticker=ticker).aggregate(
+        net_shares=Sum("shares"),
+        net_cost=Sum("amount_eur"),
+    )
+    return (
+        agg["net_shares"] or Decimal("0"),
+        agg["net_cost"] or Decimal("0"),
+    )
+
+
 def infer_asset_class(group_name: str) -> str:
     """Heuristic used by the CSV import endpoint to guess the asset_class for
     a Holding it has to auto-create. Matches the convention already encoded in

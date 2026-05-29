@@ -207,9 +207,10 @@ export interface paths {
         put?: never;
         /**
          * Create Transaction
-         * @description Log a buy or sell. The backend estimates ``shares``, ``price_local``
-         *     and ``eur_per_local`` from EOD market data on ``date`` (so the SPA only
-         *     needs to send the EUR amount and date).
+         * @description Log a buy or sell. The caller submits **either** ``amount_eur`` (we
+         *     compute shares from the EOD close + FX on ``date``) **or** ``shares``
+         *     (we compute the EUR proceeds from the same EOD data). Either way the
+         *     sign convention on disk is positive for buy / negative for sell.
          */
         post: operations["portfolio_app_api_create_transaction"];
         delete?: never;
@@ -517,6 +518,56 @@ export interface paths {
          *     Powers the live preview in the Add-Investment modal (Phase 5).
          */
         get: operations["portfolio_app_api_estimate_shares"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/instruments/{ticker}/estimate-proceeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimate Proceeds
+         * @description Mirror of estimate-shares but units -> EUR. Powers the sell modal's
+         *     live preview when the user enters share count instead of EUR amount.
+         */
+        get: operations["portfolio_app_api_estimate_proceeds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/holdings/{ticker}/position": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Holding Position
+         * @description Return the current net position (signed share count + cumulative EUR
+         *     cost basis) for ``ticker``. Powers:
+         *
+         *       * "Sell all" prefill in the Add-Investment modal,
+         *       * the conditional "+ Log sell" button on the Stock single-page view
+         *         (only rendered when shares > 0).
+         *
+         *     Returns 0/0 when the ticker has no Transaction rows -- callers should
+         *     not treat that as a 404 (a brand-new holding without an initial buy
+         *     has the same shape and should still surface in the SPA).
+         */
+        get: operations["portfolio_app_api_get_holding_position"];
         put?: never;
         post?: never;
         delete?: never;
@@ -833,8 +884,17 @@ export interface components {
         };
         /**
          * TransactionCreate
-         * @description Body for ``POST /api/transactions``. Backend estimates ``shares``,
-         *     ``price_local`` and ``eur_per_local`` from EOD data on ``date``.
+         * @description Body for ``POST /api/transactions``.
+         *
+         *     Caller must set **exactly one** of ``amount_eur`` or ``shares``:
+         *
+         *     - ``amount_eur`` (legacy buy / EUR-mode sell): backend looks up the
+         *       EOD close + FX on ``date`` and computes ``shares``.
+         *     - ``shares`` (units-mode sell or buy by share count): backend looks up
+         *       the EOD close + FX on ``date`` and computes ``amount_eur``.
+         *
+         *     The frontend's sign convention: always positive. The endpoint flips the
+         *     sign on disk for sells.
          */
         TransactionCreate: {
             /** Date */
@@ -847,7 +907,9 @@ export interface components {
              */
             action: string;
             /** Amount Eur */
-            amount_eur: number;
+            amount_eur?: number | null;
+            /** Shares */
+            shares?: number | null;
             /**
              * Listing Currency
              * @default USD
@@ -1128,6 +1190,45 @@ export interface components {
             shares: number;
             /** Price Eur */
             price_eur: number;
+        };
+        /**
+         * EstimateProceedsOut
+         * @description Mirror of EstimateSharesOut but in the units -> EUR direction. Powers
+         *     the sell modal's live preview when the user enters share count instead
+         *     of EUR amount.
+         */
+        EstimateProceedsOut: {
+            /** Ticker */
+            ticker: string;
+            /** Date */
+            date: string;
+            /** Shares */
+            shares: number;
+            /** Price Local */
+            price_local: number;
+            /** Listing Currency */
+            listing_currency: string;
+            /** Eur Per Local */
+            eur_per_local: number;
+            /** Amount Eur */
+            amount_eur: number;
+            /** Price Eur */
+            price_eur: number;
+        };
+        /**
+         * HoldingPositionOut
+         * @description Current net position for one ticker. Returned by
+         *     ``GET /api/holdings/{ticker}/position`` so the sell modal can populate
+         *     "Sell all" and the Stock page can hide its "+ Log sell" button when
+         *     there's nothing to sell.
+         */
+        HoldingPositionOut: {
+            /** Ticker */
+            ticker: string;
+            /** Shares */
+            shares: number;
+            /** Cost Eur */
+            cost_eur: number;
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1916,6 +2017,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EstimateSharesOut"];
+                };
+            };
+        };
+    };
+    portfolio_app_api_estimate_proceeds: {
+        parameters: {
+            query: {
+                shares: number;
+                /** @description Trade date */
+                on: string;
+                listing_currency?: string;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimateProceedsOut"];
+                };
+            };
+        };
+    };
+    portfolio_app_api_get_holding_position: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingPositionOut"];
                 };
             };
         };

@@ -510,7 +510,7 @@
             }
           }
         },
-        "description": "Log a buy or sell. The backend estimates ``shares``, ``price_local``\nand ``eur_per_local`` from EOD market data on ``date`` (so the SPA only\nneeds to send the EUR amount and date).",
+        "description": "Log a buy or sell. The caller submits **either** ``amount_eur`` (we\ncompute shares from the EOD close + FX on ``date``) **or** ``shares``\n(we compute the EUR proceeds from the same EOD data). Either way the\nsign convention on disk is positive for buy / negative for sell.",
         "tags": [
           "transactions"
         ],
@@ -1368,6 +1368,113 @@
         "description": "Preview shares + USD/EUR FX for a hypothetical buy on a given date.\n\nPowers the live preview in the Add-Investment modal (Phase 5).",
         "tags": [
           "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/instruments/{ticker}/estimate-proceeds": {
+      "get": {
+        "operationId": "portfolio_app_api_estimate_proceeds",
+        "summary": "Estimate Proceeds",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "shares",
+            "schema": {
+              "title": "Shares",
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "on",
+            "schema": {
+              "description": "Trade date",
+              "format": "date",
+              "title": "On",
+              "type": "string"
+            },
+            "required": true,
+            "description": "Trade date"
+          },
+          {
+            "in": "query",
+            "name": "listing_currency",
+            "schema": {
+              "default": "USD",
+              "title": "Listing Currency",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateProceedsOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Mirror of estimate-shares but units -> EUR. Powers the sell modal's\nlive preview when the user enters share count instead of EUR amount.",
+        "tags": [
+          "instruments"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/holdings/{ticker}/position": {
+      "get": {
+        "operationId": "portfolio_app_api_get_holding_position",
+        "summary": "Get Holding Position",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingPositionOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Return the current net position (signed share count + cumulative EUR\ncost basis) for ``ticker``. Powers:\n\n  * \"Sell all\" prefill in the Add-Investment modal,\n  * the conditional \"+ Log sell\" button on the Stock single-page view\n    (only rendered when shares > 0).\n\nReturns 0/0 when the ticker has no Transaction rows -- callers should\nnot treat that as a 404 (a brand-new holding without an initial buy\nhas the same shape and should still surface in the SPA).",
+        "tags": [
+          "holdings"
         ],
         "security": [
           {
@@ -2348,7 +2455,7 @@
         "type": "object"
       },
       "TransactionCreate": {
-        "description": "Body for ``POST /api/transactions``. Backend estimates ``shares``,\n``price_local`` and ``eur_per_local`` from EOD data on ``date``.",
+        "description": "Body for ``POST /api/transactions``.\n\nCaller must set **exactly one** of ``amount_eur`` or ``shares``:\n\n- ``amount_eur`` (legacy buy / EUR-mode sell): backend looks up the\n  EOD close + FX on ``date`` and computes ``shares``.\n- ``shares`` (units-mode sell or buy by share count): backend looks up\n  the EOD close + FX on ``date`` and computes ``amount_eur``.\n\nThe frontend's sign convention: always positive. The endpoint flips the\nsign on disk for sells.",
         "properties": {
           "date": {
             "title": "Date",
@@ -2364,8 +2471,26 @@
             "type": "string"
           },
           "amount_eur": {
-            "title": "Amount Eur",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Eur"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
           },
           "listing_currency": {
             "default": "USD",
@@ -2385,8 +2510,7 @@
         },
         "required": [
           "date",
-          "ticker",
-          "amount_eur"
+          "ticker"
         ],
         "title": "TransactionCreate",
         "type": "object"
@@ -3244,6 +3368,79 @@
           "price_eur"
         ],
         "title": "EstimateSharesOut",
+        "type": "object"
+      },
+      "EstimateProceedsOut": {
+        "description": "Mirror of EstimateSharesOut but in the units -> EUR direction. Powers\nthe sell modal's live preview when the user enters share count instead\nof EUR amount.",
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "shares": {
+            "title": "Shares",
+            "type": "number"
+          },
+          "price_local": {
+            "title": "Price Local",
+            "type": "number"
+          },
+          "listing_currency": {
+            "title": "Listing Currency",
+            "type": "string"
+          },
+          "eur_per_local": {
+            "title": "Eur Per Local",
+            "type": "number"
+          },
+          "amount_eur": {
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "price_eur": {
+            "title": "Price Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker",
+          "date",
+          "shares",
+          "price_local",
+          "listing_currency",
+          "eur_per_local",
+          "amount_eur",
+          "price_eur"
+        ],
+        "title": "EstimateProceedsOut",
+        "type": "object"
+      },
+      "HoldingPositionOut": {
+        "description": "Current net position for one ticker. Returned by\n``GET /api/holdings/{ticker}/position`` so the sell modal can populate\n\"Sell all\" and the Stock page can hide its \"+ Log sell\" button when\nthere's nothing to sell.",
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "shares": {
+            "title": "Shares",
+            "type": "number"
+          },
+          "cost_eur": {
+            "title": "Cost Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker",
+          "shares",
+          "cost_eur"
+        ],
+        "title": "HoldingPositionOut",
         "type": "object"
       },
       "SettingsOut": {
