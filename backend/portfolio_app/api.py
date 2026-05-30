@@ -51,6 +51,7 @@ from .schemas import (
     GroupCreate,
     GroupOut,
     GroupPatch,
+    HoldingListItem,
     ImportResultOut,
     RowImportError,
     LoginIn,
@@ -71,6 +72,8 @@ from .schemas import (
     SettingsOut,
     SettingsUpdate,
     Sparkline,
+    SwapCreate,
+    SwapResultOut,
     TopMover,
     TransactionCreate,
     TransactionOut,
@@ -823,6 +826,7 @@ def _tx_to_dict(t: Transaction) -> dict:
         "shares": float(t.shares),
         "fee_eur": float(t.fee_eur),
         "note": t.note or "",
+        "swap_group_id": str(t.swap_group_id) if t.swap_group_id else None,
     }
 
 
@@ -923,6 +927,129 @@ def create_transaction(request, body: TransactionCreate):
     return 201, _tx_to_dict(t)
 
 
+@api.post(
+    "/transactions/swap",
+    response={201: SwapResultOut, 400: ErrorOut},
+    tags=["transactions"],
+)
+def create_swap(request, body: SwapCreate):
+    """Record a coin-for-coin swap as two linked Transaction rows.
+
+    Example: swapping 1000 USDC-EUR for 0.025 BTC-EUR creates:
+      * a SELL of USDC-EUR  (amount_eur and shares both negative),
+      * a BUY  of BTC-EUR   (amount_eur and shares both positive),
+    both tagged with one ``swap_group_id`` so the ledger shows them as a
+    single event. The EUR value is shared across both legs (it's the same
+    economic amount changing form), so the swap is P&L-neutral at the moment
+    it happens -- only the subsequent price movement of the received coin
+    drives gains/losses.
+
+    Both tickers must already be holdings. ``eur_value`` defaults to the EOD
+    value of the ``from`` leg on ``date`` if not supplied.
+    """
+    from uuid import uuid4
+
+    if body.from_amount <= 0 or body.to_amount <= 0:
+        return 400, {"detail": "from_amount and to_amount must both be > 0"}
+
+    from_ticker = (body.from_ticker or "").strip().upper()
+    to_ticker = (body.to_ticker or "").strip().upper()
+    if not from_ticker or not to_ticker:
+        return 400, {"detail": "from_ticker and to_ticker are required"}
+    if from_ticker == to_ticker:
+        return 400, {"detail": "from_ticker and to_ticker must differ"}
+
+    from_holding = Holding.objects.filter(
+        ticker=from_ticker, kind=HoldingKind.PORTFOLIO
+    ).first()
+    to_holding = Holding.objects.filter(
+        ticker=to_ticker, kind=HoldingKind.PORTFOLIO
+    ).first()
+    if from_holding is None:
+        return 400, {"detail": f"No portfolio holding for '{from_ticker}'"}
+    if to_holding is None:
+        return 400, {"detail": f"No portfolio holding for '{to_ticker}'"}
+
+    try:
+        trade_date = date.fromisoformat(body.date)
+    except (TypeError, ValueError):
+        return 400, {"detail": f"date must be YYYY-MM-DD (got {body.date!r})"}
+
+    adapter = get_registry().adapter
+    from_ccy = (body.from_currency or from_holding.currency or "EUR").upper()
+    to_ccy = (body.to_currency or to_holding.currency or "EUR").upper()
+
+    try:
+        # Price both legs on the trade date so we can store price_local +
+        # eur_per_local per row (sentinel amount of 1.0 just recovers the
+        # close + FX without a meaningful share count).
+        from_est = pf.estimate_shares(
+            adapter, from_ticker, trade_date, 1.0, listing_currency=from_ccy
+        )
+        to_est = pf.estimate_shares(
+            adapter, to_ticker, trade_date, 1.0, listing_currency=to_ccy
+        )
+    except DataUnavailableError as e:
+        return 400, {"detail": f"price unavailable: {e}"}
+
+    # EUR value of the swap. Default to the EOD value of the from leg.
+    from_price_eur = from_est["price_local"] * from_est["eur_per_local"]
+    if body.eur_value is not None:
+        if body.eur_value <= 0:
+            return 400, {"detail": "eur_value must be > 0"}
+        eur_value = float(body.eur_value)
+    else:
+        eur_value = body.from_amount * from_price_eur
+
+    swap_id = uuid4()
+    short = str(swap_id)[:8]
+    base_note = (body.note or "").strip()
+    sell_note = (f"{base_note} " if base_note else "") + f"swap→{to_ticker} [{short}]"
+    buy_note = (f"{base_note} " if base_note else "") + f"swap←{from_ticker} [{short}]"
+
+    with db_transaction.atomic():
+        sell = Transaction.objects.create(
+            date=trade_date,
+            ticker=from_ticker,
+            group=from_holding.group,
+            action="sell",
+            amount_eur=Decimal(str(eur_value)) * -1,
+            price_local=Decimal(str(from_est["price_local"])),
+            listing_currency=from_est["listing_currency"],
+            eur_per_local=Decimal(str(from_est["eur_per_local"])),
+            shares=Decimal(str(body.from_amount)) * -1,
+            fee_eur=Decimal(str(body.fee_eur or 0)),   # fee charged once, on the sell leg
+            note=sell_note,
+            swap_group_id=swap_id,
+        )
+        buy = Transaction.objects.create(
+            date=trade_date,
+            ticker=to_ticker,
+            group=to_holding.group,
+            action="buy",
+            amount_eur=Decimal(str(eur_value)),
+            price_local=Decimal(str(to_est["price_local"])),
+            listing_currency=to_est["listing_currency"],
+            eur_per_local=Decimal(str(to_est["eur_per_local"])),
+            shares=Decimal(str(body.to_amount)),
+            fee_eur=Decimal("0"),
+            note=buy_note,
+            swap_group_id=swap_id,
+        )
+
+    audit(
+        request,
+        "/transactions/swap",
+        "POST",
+        body.dict() | {"swap_group_id": str(swap_id), "eur_value": eur_value},
+    )
+    return 201, {
+        "swap_group_id": str(swap_id),
+        "sell": _tx_to_dict(sell),
+        "buy": _tx_to_dict(buy),
+    }
+
+
 @api.patch("/transactions/{tx_id}", response=TransactionOut, tags=["transactions"])
 def update_transaction(request, tx_id: int, body: TransactionPatch):
     """Edit just the ``note`` and/or ``fee_eur`` on an existing transaction.
@@ -956,6 +1083,30 @@ def delete_transaction(request, tx_id: int):
 # ============================================================================ #
 # Holdings + Groups (mutating, Phase 6)
 # ============================================================================ #
+@api.get("/holdings", response=list[HoldingListItem], tags=["holdings"])
+def list_holdings(request, asset_class: Optional[str] = None, kind: str = "portfolio"):
+    """List every holding (optionally filtered by asset_class / kind).
+
+    Unlike ``/portfolio`` this includes holdings with zero transactions, so
+    the swap modal's *to* picker can target a coin you've just added but
+    haven't funded yet."""
+    qs = Holding.objects.filter(kind=kind)
+    if asset_class:
+        _assert_asset_class(asset_class)
+        qs = qs.filter(asset_class=asset_class)
+    return [
+        {
+            "kind": h.kind,
+            "asset_class": h.asset_class,
+            "group": h.group,
+            "ticker": h.ticker,
+            "name": h.name,
+            "currency": h.currency,
+        }
+        for h in qs.order_by("ticker")
+    ]
+
+
 @api.post(
     "/holdings",
     response={201: HoldingOut, 400: ErrorOut},

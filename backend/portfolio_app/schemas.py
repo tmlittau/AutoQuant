@@ -121,6 +121,7 @@ class TransactionOut(Schema):
     shares: float
     fee_eur: float
     note: str
+    swap_group_id: Optional[str] = None   # set on both legs of a swap; else None
 
 
 class TransactionCreate(Schema):
@@ -152,6 +153,38 @@ class TransactionPatch(Schema):
 
     note: Optional[str] = None
     fee_eur: Optional[float] = None
+
+
+class SwapCreate(Schema):
+    """Body for ``POST /api/transactions/swap``.
+
+    Models a single coin-for-coin swap (e.g. 1000 USDC-EUR -> 0.025 BTC-EUR)
+    as two linked Transaction rows: a sell of ``from_ticker`` and a buy of
+    ``to_ticker``, both tagged with one shared ``swap_group_id``.
+
+    Both holdings must already exist (add them via the Add-Coin flow first).
+    ``eur_value`` is the EUR value of the swapped amount; if omitted the
+    backend prices the ``from`` leg from EOD data on ``date``.
+    """
+
+    date: str                            # ISO YYYY-MM-DD
+    from_ticker: str
+    from_amount: float                   # units of from_ticker leaving the wallet (> 0)
+    from_currency: str = "EUR"
+    to_ticker: str
+    to_amount: float                     # units of to_ticker entering the wallet (> 0)
+    to_currency: str = "EUR"
+    eur_value: Optional[float] = None    # EUR value of the swap; computed if omitted
+    fee_eur: float = 0.0
+    note: str = ""
+
+
+class SwapResultOut(Schema):
+    """Both legs of a created swap, plus the shared group id."""
+
+    swap_group_id: str
+    sell: TransactionOut                 # the from_ticker leg (negative shares)
+    buy: TransactionOut                  # the to_ticker leg (positive shares)
 
 
 # --------------------------------------------------------------------------- #
@@ -221,6 +254,19 @@ class HoldingOut(Schema):
     name: str
     currency: str
     transaction: Optional[TransactionOut] = None   # filled if an initial buy was logged
+
+
+class HoldingListItem(Schema):
+    """Slim holding row for pickers (e.g. the swap from/to selectors). Unlike
+    the portfolio snapshot this lists every holding -- including freshly-added
+    coins that have no transactions yet, which a swap's *to* leg needs."""
+
+    kind: str
+    asset_class: str
+    group: str
+    ticker: str
+    name: str
+    currency: str
 
 
 class GroupCreate(Schema):

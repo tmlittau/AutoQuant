@@ -96,13 +96,36 @@
     loadSignals(ac);
   });
 
+  // All holdings for the sleeve (incl. zero-position ones) -- the swap "to"
+  // picker needs coins that have no transactions yet. Falls back to the
+  // positions list if the holdings fetch hasn't returned.
+  let allHoldings = $state<any[]>([]);
+  $effect(() => {
+    const ac = assetClass;
+    const _rev = $transactionsRevision;
+    apiGet('/api/holdings', { params: { query: { asset_class: ac, kind: 'portfolio' } } })
+      .then((r: any) => {
+        allHoldings = (r as any[]) ?? [];
+      })
+      .catch(() => {
+        allHoldings = [];
+      });
+  });
+
   let modalHoldings = $derived(
-    (snap?.positions ?? []).map((p: any) => ({
-      ticker: p.ticker,
-      name: p.name,
-      currency: p.currency,
-      group: p.group,
-    })),
+    allHoldings.length > 0
+      ? allHoldings.map((h: any) => ({
+          ticker: h.ticker,
+          name: h.name,
+          currency: h.currency,
+          group: h.group,
+        }))
+      : (snap?.positions ?? []).map((p: any) => ({
+          ticker: p.ticker,
+          name: p.name,
+          currency: p.currency,
+          group: p.group,
+        })),
   );
 
   // -------------------------------------------------------------------------
@@ -430,7 +453,7 @@
         onclick={() => (modalOpen = true)}
         class="w-full sm:w-auto px-4 py-2 min-h-[44px] text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
       >
-        + Add Investment
+        {#if assetClass === 'crypto'}Deposit / Withdraw / Swap{:else}+ Add Investment{/if}
       </button>
     </div>
 
@@ -724,6 +747,7 @@
   open={modalOpen}
   onClose={() => (modalOpen = false)}
   holdings={modalHoldings}
+  {assetClass}
 />
 
 <AddStockModal

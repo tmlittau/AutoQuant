@@ -642,6 +642,54 @@
         ]
       }
     },
+    "/api/transactions/swap": {
+      "post": {
+        "operationId": "portfolio_app_api_create_swap",
+        "summary": "Create Swap",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwapResultOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Record a coin-for-coin swap as two linked Transaction rows.\n\nExample: swapping 1000 USDC-EUR for 0.025 BTC-EUR creates:\n  * a SELL of USDC-EUR  (amount_eur and shares both negative),\n  * a BUY  of BTC-EUR   (amount_eur and shares both positive),\nboth tagged with one ``swap_group_id`` so the ledger shows them as a\nsingle event. The EUR value is shared across both legs (it's the same\neconomic amount changing form), so the swap is P&L-neutral at the moment\nit happens -- only the subsequent price movement of the received coin\ndrives gains/losses.\n\nBoth tickers must already be holdings. ``eur_value`` defaults to the EOD\nvalue of the ``from`` leg on ``date`` if not supplied.",
+        "tags": [
+          "transactions"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/transactions/{tx_id}": {
       "patch": {
         "operationId": "portfolio_app_api_update_transaction",
@@ -2436,6 +2484,17 @@
           "note": {
             "title": "Note",
             "type": "string"
+          },
+          "swap_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Swap Group Id"
           }
         },
         "required": [
@@ -2578,6 +2637,93 @@
           "message"
         ],
         "title": "RowImportError",
+        "type": "object"
+      },
+      "SwapResultOut": {
+        "description": "Both legs of a created swap, plus the shared group id.",
+        "properties": {
+          "swap_group_id": {
+            "title": "Swap Group Id",
+            "type": "string"
+          },
+          "sell": {
+            "$ref": "#/components/schemas/TransactionOut"
+          },
+          "buy": {
+            "$ref": "#/components/schemas/TransactionOut"
+          }
+        },
+        "required": [
+          "swap_group_id",
+          "sell",
+          "buy"
+        ],
+        "title": "SwapResultOut",
+        "type": "object"
+      },
+      "SwapCreate": {
+        "description": "Body for ``POST /api/transactions/swap``.\n\nModels a single coin-for-coin swap (e.g. 1000 USDC-EUR -> 0.025 BTC-EUR)\nas two linked Transaction rows: a sell of ``from_ticker`` and a buy of\n``to_ticker``, both tagged with one shared ``swap_group_id``.\n\nBoth holdings must already exist (add them via the Add-Coin flow first).\n``eur_value`` is the EUR value of the swapped amount; if omitted the\nbackend prices the ``from`` leg from EOD data on ``date``.",
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "from_ticker": {
+            "title": "From Ticker",
+            "type": "string"
+          },
+          "from_amount": {
+            "title": "From Amount",
+            "type": "number"
+          },
+          "from_currency": {
+            "default": "EUR",
+            "title": "From Currency",
+            "type": "string"
+          },
+          "to_ticker": {
+            "title": "To Ticker",
+            "type": "string"
+          },
+          "to_amount": {
+            "title": "To Amount",
+            "type": "number"
+          },
+          "to_currency": {
+            "default": "EUR",
+            "title": "To Currency",
+            "type": "string"
+          },
+          "eur_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eur Value"
+          },
+          "fee_eur": {
+            "default": 0.0,
+            "title": "Fee Eur",
+            "type": "number"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "from_ticker",
+          "from_amount",
+          "to_ticker",
+          "to_amount"
+        ],
+        "title": "SwapCreate",
         "type": "object"
       },
       "TransactionPatch": {

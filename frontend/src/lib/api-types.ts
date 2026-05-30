@@ -275,6 +275,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/transactions/swap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Swap
+         * @description Record a coin-for-coin swap as two linked Transaction rows.
+         *
+         *     Example: swapping 1000 USDC-EUR for 0.025 BTC-EUR creates:
+         *       * a SELL of USDC-EUR  (amount_eur and shares both negative),
+         *       * a BUY  of BTC-EUR   (amount_eur and shares both positive),
+         *     both tagged with one ``swap_group_id`` so the ledger shows them as a
+         *     single event. The EUR value is shared across both legs (it's the same
+         *     economic amount changing form), so the swap is P&L-neutral at the moment
+         *     it happens -- only the subsequent price movement of the received coin
+         *     drives gains/losses.
+         *
+         *     Both tickers must already be holdings. ``eur_value`` defaults to the EOD
+         *     value of the ``from`` leg on ``date`` if not supplied.
+         */
+        post: operations["portfolio_app_api_create_swap"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/transactions/{tx_id}": {
         parameters: {
             query?: never;
@@ -888,6 +920,8 @@ export interface components {
             fee_eur: number;
             /** Note */
             note: string;
+            /** Swap Group Id */
+            swap_group_id?: string | null;
         };
         /**
          * TransactionCreate
@@ -966,6 +1000,62 @@ export interface components {
             row_index: number;
             /** Message */
             message: string;
+        };
+        /**
+         * SwapResultOut
+         * @description Both legs of a created swap, plus the shared group id.
+         */
+        SwapResultOut: {
+            /** Swap Group Id */
+            swap_group_id: string;
+            sell: components["schemas"]["TransactionOut"];
+            buy: components["schemas"]["TransactionOut"];
+        };
+        /**
+         * SwapCreate
+         * @description Body for ``POST /api/transactions/swap``.
+         *
+         *     Models a single coin-for-coin swap (e.g. 1000 USDC-EUR -> 0.025 BTC-EUR)
+         *     as two linked Transaction rows: a sell of ``from_ticker`` and a buy of
+         *     ``to_ticker``, both tagged with one shared ``swap_group_id``.
+         *
+         *     Both holdings must already exist (add them via the Add-Coin flow first).
+         *     ``eur_value`` is the EUR value of the swapped amount; if omitted the
+         *     backend prices the ``from`` leg from EOD data on ``date``.
+         */
+        SwapCreate: {
+            /** Date */
+            date: string;
+            /** From Ticker */
+            from_ticker: string;
+            /** From Amount */
+            from_amount: number;
+            /**
+             * From Currency
+             * @default EUR
+             */
+            from_currency: string;
+            /** To Ticker */
+            to_ticker: string;
+            /** To Amount */
+            to_amount: number;
+            /**
+             * To Currency
+             * @default EUR
+             */
+            to_currency: string;
+            /** Eur Value */
+            eur_value?: number | null;
+            /**
+             * Fee Eur
+             * @default 0
+             */
+            fee_eur: number;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
         };
         /**
          * TransactionPatch
@@ -1614,6 +1704,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportResultOut"];
+                };
+            };
+        };
+    };
+    portfolio_app_api_create_swap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwapCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwapResultOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

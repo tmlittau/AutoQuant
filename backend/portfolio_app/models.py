@@ -100,6 +100,11 @@ class Transaction(models.Model):
         max_digits=10, decimal_places=4, default=Decimal("0")
     )
     note = models.CharField(max_length=255, blank=True, default="")
+    # Links the two halves of a swap (a sell of one coin + a buy of another in
+    # a single user action, e.g. 1000 USDC -> 0.025 BTC). NULL for ordinary
+    # buys/sells. Both rows of a swap share the same UUID so the ledger can
+    # collapse them into one displayed event.
+    swap_group_id = models.UUIDField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
