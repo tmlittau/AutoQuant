@@ -11,6 +11,14 @@ PyYAML>=6.0          # portfolio.yaml config
 yfinance>=0.2        # default adapter, no API key / request cap
 # alphavantage: no package needed (uses requests + your .env key)
 
+# Quant engine (risk analytics, backtesting, factor model, optimization).
+# All pure-Python / manylinux wheels -- no system deps. Adds ~150MB to the image.
+scikit-learn>=1.4    # Ledoit-Wolf covariance shrinkage; HMM scaffolding
+hmmlearn>=0.3        # Gaussian HMM market-regime detection
+PyPortfolioOpt>=1.5  # HRP, mean-CVaR, Black-Litterman, efficient frontier
+cvxpy>=1.4           # convex solver backend for the CVaR LP / MVO QP
+# scipy is pulled in transitively by scikit-learn / cvxpy.
+
 # Webapp backend (Django + django-ninja serves the SPA + API in prod)
 django>=5.1
 django-ninja>=1.6
