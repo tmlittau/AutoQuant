@@ -21,6 +21,7 @@
       label: 'Diversification',
       match: /^\/portfolio\/diversification/,
     },
+    { href: '/portfolio/risk', label: 'Risk', match: /^\/portfolio\/risk/ },
     { href: '/watchlist', label: 'Watchlist', match: /^\/watchlist/ },
     { href: '/transactions', label: 'Transactions', match: /^\/transactions/ },
     { href: '/settings', label: 'Settings', match: /^\/settings/ },

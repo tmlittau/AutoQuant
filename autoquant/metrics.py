@@ -179,6 +179,104 @@ def sharpe_ratio(
     return float(np.sqrt(periods_per_year) * excess.mean() / std)
 
 
+def downside_deviation(
+    returns: pd.Series,
+    target: float = 0.0,
+    periods_per_year: int = TRADING_DAYS,
+) -> float:
+    """Annualised standard deviation of returns *below* ``target`` (per-period).
+
+    Unlike plain volatility this ignores upside dispersion -- the denominator of
+    the Sortino ratio. ``target`` is a per-period threshold (default 0).
+    """
+    clean = returns.dropna()
+    downside = (clean - target).clip(upper=0.0)
+    if clean.empty:
+        return float("nan")
+    # Mean of squared shortfalls over the full sample (not just down days), per
+    # the standard Sortino definition.
+    dd = np.sqrt((downside**2).mean())
+    return float(dd * np.sqrt(periods_per_year))
+
+
+def sortino_ratio(
+    returns: pd.Series,
+    risk_free: float = 0.0,
+    periods_per_year: int = TRADING_DAYS,
+) -> float:
+    """Annualised Sortino ratio: excess return over *downside* deviation."""
+    clean = returns.dropna()
+    if clean.empty:
+        return float("nan")
+    excess = clean - risk_free / periods_per_year
+    dd = downside_deviation(clean, target=0.0, periods_per_year=periods_per_year)
+    if dd == 0 or np.isnan(dd):
+        return float("nan")
+    return float(np.sqrt(periods_per_year) * excess.mean() / (dd / np.sqrt(periods_per_year)))
+
+
+def calmar_ratio(prices: pd.Series, periods_per_year: int = TRADING_DAYS) -> float:
+    """Annualised return divided by the absolute max drawdown.
+
+    Takes *prices* (a value/equity curve) rather than returns because both the
+    numerator (geometric annual return) and denominator (max drawdown) come from
+    the cumulative path.
+    """
+    clean = prices.dropna()
+    if len(clean) < 2:
+        return float("nan")
+    mdd = abs(max_drawdown(clean))
+    if mdd == 0 or np.isnan(mdd):
+        return float("nan")
+    return float(annualized_return(clean, periods_per_year) / mdd)
+
+
+def value_at_risk(returns: pd.Series, level: float = 0.95) -> float:
+    """Historical Value at Risk at ``level`` confidence, as a positive fraction.
+
+    VaR(95%) = the loss the portfolio exceeds only 5% of the time. Returned as a
+    positive number (a 0.03 means "lose 3% or more on the worst 5% of days").
+    """
+    clean = returns.dropna()
+    if clean.empty:
+        return float("nan")
+    q = clean.quantile(1.0 - level)
+    return float(-q)
+
+
+def conditional_value_at_risk(returns: pd.Series, level: float = 0.95) -> float:
+    """Historical Conditional VaR (Expected Shortfall) at ``level``.
+
+    The *average* loss on the days worse than the VaR threshold -- a coherent,
+    sub-additive tail-risk measure. Returned as a positive fraction.
+    """
+    clean = returns.dropna()
+    if clean.empty:
+        return float("nan")
+    threshold = clean.quantile(1.0 - level)
+    tail = clean[clean <= threshold]
+    if tail.empty:
+        return float("nan")
+    return float(-tail.mean())
+
+
+def beta(returns: pd.Series, benchmark_returns: pd.Series) -> float:
+    """Market beta: slope of ``returns`` regressed on ``benchmark_returns``.
+
+    Beta 1 = moves with the benchmark; <1 defensive; >1 amplified. Aligns the
+    two series on their common dates first.
+    """
+    df = pd.concat([returns, benchmark_returns], axis=1, join="inner").dropna()
+    if len(df) < 2:
+        return float("nan")
+    asset, bench = df.iloc[:, 0], df.iloc[:, 1]
+    var_b = bench.var(ddof=1)
+    if var_b == 0 or np.isnan(var_b):
+        return float("nan")
+    cov = asset.cov(bench)
+    return float(cov / var_b)
+
+
 # --------------------------------------------------------------------------- #
 # Convenience: a standard indicator panel
 # --------------------------------------------------------------------------- #

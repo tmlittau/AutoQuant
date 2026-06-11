@@ -299,6 +299,55 @@
         ]
       }
     },
+    "/api/portfolio/risk": {
+      "get": {
+        "operationId": "portfolio_app_api_get_portfolio_risk",
+        "summary": "Get Portfolio Risk",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_class",
+            "schema": {
+              "default": "stocks",
+              "title": "Asset Class",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "lookback",
+            "schema": {
+              "default": 252,
+              "title": "Lookback",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioRiskOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Risk/return analytics for the current allocation of ``asset_class``.\n\nComputes the metric suite (Sharpe/Sortino/Calmar/CVaR/max-DD/beta) on the\ncurrent-weights-applied-to-history return series, the Ledoit-Wolf shrunk\ncovariance, per-holding risk contributions, the effective number of bets,\nand rolling vol + drawdown series for the charts. Cached 10 min.",
+        "tags": [
+          "portfolio"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/portfolio/signals": {
       "get": {
         "operationId": "portfolio_app_api_get_portfolio_signals",
@@ -777,6 +826,63 @@
       }
     },
     "/api/holdings": {
+      "get": {
+        "operationId": "portfolio_app_api_list_holdings",
+        "summary": "List Holdings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_class",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Class"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "default": "portfolio",
+              "title": "Kind",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HoldingListItem"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "description": "List every holding (optionally filtered by asset_class / kind).\n\nUnlike ``/portfolio`` this includes holdings with zero transactions, so\nthe swap modal's *to* picker can target a coin you've just added but\nhaven't funded yet.",
+        "tags": [
+          "holdings"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      },
       "post": {
         "operationId": "portfolio_app_api_create_holding",
         "summary": "Create Holding",
@@ -2240,6 +2346,279 @@
         "title": "DiversificationOut",
         "type": "object"
       },
+      "PortfolioRiskOut": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "lookback_days": {
+            "title": "Lookback Days",
+            "type": "integer"
+          },
+          "n_obs": {
+            "title": "N Obs",
+            "type": "integer"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RiskMetricsOut"
+          },
+          "effective_bets": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Bets"
+          },
+          "shrinkage_intensity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shrinkage Intensity"
+          },
+          "benchmark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark"
+          },
+          "contributions": {
+            "items": {
+              "$ref": "#/components/schemas/RiskContributionOut"
+            },
+            "title": "Contributions",
+            "type": "array"
+          },
+          "dates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "rolling_volatility": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Rolling Volatility",
+            "type": "array"
+          },
+          "drawdown": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Drawdown",
+            "type": "array"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asset_class",
+          "lookback_days",
+          "n_obs",
+          "metrics",
+          "contributions",
+          "dates",
+          "rolling_volatility",
+          "drawdown",
+          "cached"
+        ],
+        "title": "PortfolioRiskOut",
+        "type": "object"
+      },
+      "RiskContributionOut": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "contribution": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution"
+          },
+          "pct_contribution": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Contribution"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "title": "RiskContributionOut",
+        "type": "object"
+      },
+      "RiskMetricsOut": {
+        "properties": {
+          "ann_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Return"
+          },
+          "ann_volatility": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ann Volatility"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino"
+          },
+          "calmar": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calmar"
+          },
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown"
+          },
+          "var_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var 95"
+          },
+          "cvar_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95"
+          },
+          "downside_deviation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downside Deviation"
+          },
+          "beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta"
+          }
+        },
+        "title": "RiskMetricsOut",
+        "type": "object"
+      },
       "PortfolioSignalsOut": {
         "properties": {
           "cached": {
@@ -2753,6 +3132,45 @@
           }
         },
         "title": "TransactionPatch",
+        "type": "object"
+      },
+      "HoldingListItem": {
+        "description": "Slim holding row for pickers (e.g. the swap from/to selectors). Unlike\nthe portfolio snapshot this lists every holding -- including freshly-added\ncoins that have no transactions yet, which a swap's *to* leg needs.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "asset_class",
+          "group",
+          "ticker",
+          "name",
+          "currency"
+        ],
+        "title": "HoldingListItem",
         "type": "object"
       },
       "HoldingOut": {

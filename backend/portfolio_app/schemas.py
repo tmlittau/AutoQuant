@@ -443,6 +443,44 @@ class DiversificationOut(Schema):
 
 
 # --------------------------------------------------------------------------- #
+# Portfolio risk (Phase R1)
+# --------------------------------------------------------------------------- #
+class RiskMetricsOut(Schema):
+    ann_return: Optional[float] = None
+    ann_volatility: Optional[float] = None
+    sharpe: Optional[float] = None
+    sortino: Optional[float] = None
+    calmar: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    var_95: Optional[float] = None
+    cvar_95: Optional[float] = None
+    downside_deviation: Optional[float] = None
+    beta: Optional[float] = None
+
+
+class RiskContributionOut(Schema):
+    ticker: str
+    weight: Optional[float] = None
+    contribution: Optional[float] = None          # absolute risk contribution
+    pct_contribution: Optional[float] = None       # share of total portfolio vol
+
+
+class PortfolioRiskOut(Schema):
+    asset_class: str
+    lookback_days: int
+    n_obs: int                                     # # of return observations used
+    metrics: RiskMetricsOut
+    effective_bets: Optional[float] = None         # 1 / HHI of risk contributions
+    shrinkage_intensity: Optional[float] = None    # Ledoit-Wolf delta in [0,1]
+    benchmark: Optional[str] = None
+    contributions: list[RiskContributionOut]
+    dates: list[str]                               # for the rolling charts
+    rolling_volatility: list[Optional[float]]
+    drawdown: list[Optional[float]]
+    cached: bool
+
+
+# --------------------------------------------------------------------------- #
 # Settings
 # --------------------------------------------------------------------------- #
 class SettingsOut(Schema):

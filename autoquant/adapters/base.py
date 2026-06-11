@@ -88,6 +88,25 @@ class MarketDataAdapter(ABC):
         frame.index.name = "date"
         return frame
 
+    def get_close_history(self, symbols: Iterable[str]) -> pd.DataFrame:
+        """Aligned *deep-history* daily closes (``outputsize="full"`` per symbol).
+
+        ``get_close_prices`` uses the compact (~1y) window every existing
+        endpoint relies on; this pulls the full available history instead, which
+        covariance estimation and backtesting need for stability. Per-symbol
+        results are cached by the adapter (yfinance keeps an in-memory ``_cache``;
+        Alpha Vantage caches on disk), so the heavy fetch happens once.
+        """
+        closes = {}
+        for s in symbols:
+            try:
+                closes[s] = self.get_daily(s, outputsize="full")["close"]
+            except Exception:  # pragma: no cover - one bad symbol shouldn't abort
+                continue
+        frame = pd.DataFrame(closes).sort_index()
+        frame.index.name = "date"
+        return frame
+
     def eur_per_usd_series(self) -> pd.Series:
         """Historical daily USD->EUR close (EUR per 1 USD)."""
         return self.get_fx_daily("USD", "EUR")["close"].rename("eur_per_usd")

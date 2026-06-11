@@ -148,6 +148,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolio/risk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Risk
+         * @description Risk/return analytics for the current allocation of ``asset_class``.
+         *
+         *     Computes the metric suite (Sharpe/Sortino/Calmar/CVaR/max-DD/beta) on the
+         *     current-weights-applied-to-history return series, the Ledoit-Wolf shrunk
+         *     covariance, per-holding risk contributions, the effective number of bets,
+         *     and rolling vol + drawdown series for the charts. Cached 10 min.
+         */
+        get: operations["portfolio_app_api_get_portfolio_risk"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolio/signals": {
         parameters: {
             query?: never;
@@ -337,7 +362,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Holdings
+         * @description List every holding (optionally filtered by asset_class / kind).
+         *
+         *     Unlike ``/portfolio`` this includes holdings with zero transactions, so
+         *     the swap modal's *to* picker can target a coin you've just added but
+         *     haven't funded yet.
+         */
+        get: operations["portfolio_app_api_list_holdings"];
         put?: never;
         /**
          * Create Holding
@@ -843,6 +876,66 @@ export interface components {
             /** Cached */
             cached: boolean;
         };
+        /** PortfolioRiskOut */
+        PortfolioRiskOut: {
+            /** Asset Class */
+            asset_class: string;
+            /** Lookback Days */
+            lookback_days: number;
+            /** N Obs */
+            n_obs: number;
+            metrics: components["schemas"]["RiskMetricsOut"];
+            /** Effective Bets */
+            effective_bets?: number | null;
+            /** Shrinkage Intensity */
+            shrinkage_intensity?: number | null;
+            /** Benchmark */
+            benchmark?: string | null;
+            /** Contributions */
+            contributions: components["schemas"]["RiskContributionOut"][];
+            /** Dates */
+            dates: string[];
+            /** Rolling Volatility */
+            rolling_volatility: (number | null)[];
+            /** Drawdown */
+            drawdown: (number | null)[];
+            /** Cached */
+            cached: boolean;
+        };
+        /** RiskContributionOut */
+        RiskContributionOut: {
+            /** Ticker */
+            ticker: string;
+            /** Weight */
+            weight?: number | null;
+            /** Contribution */
+            contribution?: number | null;
+            /** Pct Contribution */
+            pct_contribution?: number | null;
+        };
+        /** RiskMetricsOut */
+        RiskMetricsOut: {
+            /** Ann Return */
+            ann_return?: number | null;
+            /** Ann Volatility */
+            ann_volatility?: number | null;
+            /** Sharpe */
+            sharpe?: number | null;
+            /** Sortino */
+            sortino?: number | null;
+            /** Calmar */
+            calmar?: number | null;
+            /** Max Drawdown */
+            max_drawdown?: number | null;
+            /** Var 95 */
+            var_95?: number | null;
+            /** Cvar 95 */
+            cvar_95?: number | null;
+            /** Downside Deviation */
+            downside_deviation?: number | null;
+            /** Beta */
+            beta?: number | null;
+        };
         /** PortfolioSignalsOut */
         PortfolioSignalsOut: {
             /** Cached */
@@ -1066,6 +1159,26 @@ export interface components {
             note?: string | null;
             /** Fee Eur */
             fee_eur?: number | null;
+        };
+        /**
+         * HoldingListItem
+         * @description Slim holding row for pickers (e.g. the swap from/to selectors). Unlike
+         *     the portfolio snapshot this lists every holding -- including freshly-added
+         *     coins that have no transactions yet, which a swap's *to* leg needs.
+         */
+        HoldingListItem: {
+            /** Kind */
+            kind: string;
+            /** Asset Class */
+            asset_class: string;
+            /** Group */
+            group: string;
+            /** Ticker */
+            ticker: string;
+            /** Name */
+            name: string;
+            /** Currency */
+            currency: string;
         };
         /** HoldingOut */
         HoldingOut: {
@@ -1536,6 +1649,29 @@ export interface operations {
             };
         };
     };
+    portfolio_app_api_get_portfolio_risk: {
+        parameters: {
+            query?: {
+                asset_class?: string;
+                lookback?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioRiskOut"];
+                };
+            };
+        };
+    };
     portfolio_app_api_get_portfolio_signals: {
         parameters: {
             query?: {
@@ -1792,6 +1928,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TransactionOut"];
+                };
+            };
+        };
+    };
+    portfolio_app_api_list_holdings: {
+        parameters: {
+            query?: {
+                asset_class?: string | null;
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingListItem"][];
                 };
             };
         };

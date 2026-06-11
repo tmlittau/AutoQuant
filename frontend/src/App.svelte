@@ -9,6 +9,7 @@
   import Portfolio from './routes/Portfolio.svelte';
   import Watchlist from './routes/Watchlist.svelte';
   import Diversification from './routes/Diversification.svelte';
+  import Risk from './routes/Risk.svelte';
   import Stock from './routes/Stock.svelte';
   import Transactions from './routes/Transactions.svelte';
   import Settings from './routes/Settings.svelte';
@@ -21,6 +22,7 @@
     '/portfolio/etfs': Portfolio,
     '/portfolio/crypto': Portfolio,
     '/portfolio/diversification': Diversification,
+    '/portfolio/risk': Risk,
     '/watchlist': Watchlist,
     '/transactions': Transactions,
     '/stock/:ticker': Stock,

@@ -31,6 +31,7 @@ from ninja.security import django_auth
 import autoquant as aq
 from autoquant import metrics as m
 from autoquant import portfolio as pf
+from autoquant import risk as rk
 from autoquant import signals as sg
 from autoquant.adapters.base import DataUnavailableError
 from autoquant.client import AlphaVantageError, RateLimitError
@@ -64,6 +65,7 @@ from .schemas import (
     InstrumentQuoteOut,
     InstrumentSearchHit,
     PortfolioPosition,
+    PortfolioRiskOut,
     PortfolioSignalsOut,
     PortfolioSnapshotOut,
     PortfolioTotals,
@@ -475,6 +477,125 @@ def get_diversification(
         "cached": False,
     }
     cache.set(cache_key, {**payload, "cached": False}, timeout=10 * 60)
+    return payload
+
+
+# ============================================================================ #
+# Portfolio risk (Phase R1: covariance + risk metrics + risk contributions)
+# ============================================================================ #
+# Default benchmark for beta when the user holds no obvious index ETF. The
+# adapter resolves ^GSPC (S&P 500) fine; converted to EUR like any USD asset.
+_DEFAULT_BENCHMARK = "^GSPC"
+
+
+def _benchmark_returns(adapter, lookback_days: int) -> tuple[Optional[str], "pd.Series"]:
+    """EUR daily returns of the benchmark index for beta. Best-effort: returns
+    (None, empty) if the benchmark can't be fetched so beta just comes back NaN."""
+    try:
+        closes = adapter.get_daily(_DEFAULT_BENCHMARK)["close"]
+        # ^GSPC is USD-quoted; convert to EUR so beta is apples-to-apples with
+        # the EUR portfolio return series.
+        fx = pf.eur_per_currency_series(adapter, "USD")
+        eur = closes if fx is None else adapter.to_eur(closes, fx)
+        rets = eur.pct_change().dropna()
+        if lookback_days and len(rets) > lookback_days:
+            rets = rets.iloc[-lookback_days:]
+        return _DEFAULT_BENCHMARK, rets
+    except Exception:
+        import pandas as pd
+
+        return None, pd.Series(dtype=float)
+
+
+@api.get("/portfolio/risk", response=PortfolioRiskOut, tags=["portfolio"])
+def get_portfolio_risk(request, asset_class: str = "stocks", lookback: int = 252):
+    """Risk/return analytics for the current allocation of ``asset_class``.
+
+    Computes the metric suite (Sharpe/Sortino/Calmar/CVaR/max-DD/beta) on the
+    current-weights-applied-to-history return series, the Ledoit-Wolf shrunk
+    covariance, per-holding risk contributions, the effective number of bets,
+    and rolling vol + drawdown series for the charts. Cached 10 min.
+    """
+    _assert_asset_class(asset_class)
+    lookback = max(30, min(int(lookback), 1500))
+
+    reg = get_registry()
+    adapter = reg.adapter
+    cache_key = f"risk:{reg.name}:{asset_class}:{lookback}:{_tx_revision()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    portfolio = _portfolio_dict()
+    tx_df = repo.build_transactions_df()
+    positions = pf.current_positions(tx_df, portfolio, asset_class=asset_class)
+
+    empty = {
+        "asset_class": asset_class, "lookback_days": lookback, "n_obs": 0,
+        "metrics": {}, "effective_bets": None, "shrinkage_intensity": None,
+        "benchmark": None, "contributions": [], "dates": [],
+        "rolling_volatility": [], "drawdown": [], "cached": False,
+    }
+    if positions.empty:
+        return empty
+
+    # Current EUR weights from the live valuation.
+    prices_local = pf.latest_prices_local(adapter, list(positions.index))
+    ccy_map = pf.ticker_to_currency(portfolio, asset_class)
+    fx_rates = pf.fx_rates_for(adapter, ccy_map.values())
+    valued = pf.value_positions(positions, prices_local, ccy_map, fx_rates)
+    weights = valued["weight"].astype(float)
+    weights = weights[weights > 0]
+    if weights.empty:
+        return empty
+
+    # Returns matrix (EUR), restricted to the lookback window.
+    prices = rk.eur_price_matrix(adapter, portfolio, asset_class, lookback_days=lookback)
+    rets = rk.returns_matrix(prices)
+    # Keep only held tickers that have return data.
+    cols = [t for t in weights.index if t in rets.columns]
+    if not cols or rets.empty:
+        return empty
+    rets = rets[cols]
+    weights = weights.reindex(cols).fillna(0.0)
+
+    port_returns = rk.weighted_portfolio_returns(rets, weights)
+    bench_name, bench_returns = _benchmark_returns(adapter, lookback)
+    metrics_out = rk.risk_metrics(port_returns, benchmark_returns=bench_returns)
+
+    cov = rk.shrunk_covariance(rets)
+    contrib_df = rk.risk_contributions(weights, cov)
+    eff_bets = rk.effective_bets(weights, cov)
+    shrink = rk.shrinkage_intensity(rets)
+    rolling = rk.rolling_risk(port_returns)
+
+    contributions = [
+        {
+            "ticker": t,
+            "weight": ser.safe_float(row["weight"]),
+            "contribution": ser.safe_float(row["contribution"]),
+            "pct_contribution": ser.safe_float(row["pct_contribution"]),
+        }
+        for t, row in contrib_df.iterrows()
+    ]
+
+    vol_series = rolling["volatility"].dropna()
+    dd_series = rolling["drawdown"]
+    payload = {
+        "asset_class": asset_class,
+        "lookback_days": lookback,
+        "n_obs": int(len(port_returns.dropna())),
+        "metrics": {k: ser.safe_float(v) for k, v in metrics_out.items()},
+        "effective_bets": ser.safe_float(eff_bets),
+        "shrinkage_intensity": ser.safe_float(shrink),
+        "benchmark": bench_name,
+        "contributions": contributions,
+        "dates": [d.date().isoformat() if hasattr(d, "date") else str(d) for d in dd_series.index],
+        "rolling_volatility": ser.series_to_list(rolling["volatility"].reindex(dd_series.index)),
+        "drawdown": ser.series_to_list(dd_series),
+        "cached": False,
+    }
+    cache.set(cache_key, payload, timeout=10 * 60)
     return payload
 
 
