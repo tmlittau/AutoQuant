@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from .adapters.base import MarketDataAdapter
+from .adapters.base import DataUnavailableError, MarketDataAdapter
 from .client import PROJECT_ROOT
 
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "portfolio.yaml"
@@ -211,6 +211,52 @@ def fx_series_for(adapter: MarketDataAdapter, currencies: Iterable[str]) -> dict
 # --------------------------------------------------------------------------- #
 # Ledger mutation (estimate / add / record)
 # --------------------------------------------------------------------------- #
+def _series_asof(series: pd.Series, when: pd.Timestamp) -> float:
+    """Last value in ``series`` at or before ``when`` as a float, or NaN if the
+    date predates the series (``asof`` requires a sorted index)."""
+    if series is None or len(series) == 0:
+        return float("nan")
+    val = series.sort_index().asof(when)
+    return float("nan") if pd.isna(val) else float(val)
+
+
+def _price_asof(adapter: MarketDataAdapter, ticker: str, when: pd.Timestamp) -> float:
+    """Close price for ``ticker`` on/before ``when``.
+
+    Tries the compact (~1y) window first; if ``when`` predates it the lookup
+    returns NaN, so we widen to the full history once before giving up. Raises
+    :class:`DataUnavailableError` if there's still no price (e.g. a future date,
+    a symbol with no history, or a date before the instrument existed)."""
+    val = _series_asof(adapter.get_daily(ticker)["close"], when)
+    if pd.isna(val):
+        val = _series_asof(adapter.get_daily(ticker, outputsize="full")["close"], when)
+    if pd.isna(val):
+        raise DataUnavailableError(
+            f"no price for {ticker!r} on or before {when.date().isoformat()} "
+            "(try a more recent date, or check the symbol)"
+        )
+    return val
+
+
+def _fx_asof(
+    adapter: MarketDataAdapter, from_ccy: str, to_ccy: str, when: pd.Timestamp
+) -> float:
+    """EUR-per-``from_ccy`` rate on/before ``when``, widening to full history if
+    needed. Returns 1.0 when the currencies match."""
+    if from_ccy.upper() == to_ccy.upper():
+        return 1.0
+    val = _series_asof(adapter.get_fx_daily(from_ccy, to_ccy)["close"], when)
+    if pd.isna(val):
+        val = _series_asof(
+            adapter.get_fx_daily(from_ccy, to_ccy, outputsize="full")["close"], when
+        )
+    if pd.isna(val):
+        raise DataUnavailableError(
+            f"no FX rate {from_ccy}->{to_ccy} on or before {when.date().isoformat()}"
+        )
+    return val
+
+
 def estimate_shares(
     adapter: MarketDataAdapter,
     ticker: str,
@@ -223,14 +269,22 @@ def estimate_shares(
     Uses the daily close on (or the last session before) ``date`` and the
     EUR-per-listing-currency rate on that date. Returns ``price_local``,
     ``listing_currency``, ``eur_per_local`` and the implied share count.
+
+    Raises :class:`DataUnavailableError` (rather than returning NaN) when the
+    price or FX rate can't be resolved for the date -- so callers get a clean
+    error instead of a NaN propagating into a Decimal crash downstream. The
+    history window auto-widens to ``full`` for dates older than the compact
+    window.
     """
     when = pd.Timestamp(date)
-    close_local = float(adapter.get_daily(ticker)["close"].asof(when))
-    if listing_currency.upper() == "EUR":
-        rate = 1.0
-    else:
-        rate = float(adapter.get_fx_daily(listing_currency, "EUR")["close"].asof(when))
+    close_local = _price_asof(adapter, ticker, when)
+    rate = _fx_asof(adapter, listing_currency, "EUR", when)
     price_eur = close_local * rate
+    if not np.isfinite(price_eur) or price_eur <= 0:
+        raise DataUnavailableError(
+            f"invalid/non-positive price for {ticker!r} on "
+            f"{when.date().isoformat()} (got {price_eur})"
+        )
     shares = amount_eur / price_eur
     return {
         "price_local": close_local,

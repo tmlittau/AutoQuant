@@ -1842,7 +1842,10 @@ def estimate_shares(
     if amount_eur <= 0:
         raise HttpError(400, "amount_eur must be > 0")
     adapter = get_registry().adapter
-    est = pf.estimate_shares(adapter, ticker, on, amount_eur, listing_currency=listing_currency)
+    try:
+        est = pf.estimate_shares(adapter, ticker, on, amount_eur, listing_currency=listing_currency)
+    except DataUnavailableError as e:
+        raise HttpError(400, str(e))
     return {
         "ticker": ticker,
         "date": on.isoformat(),
@@ -1873,7 +1876,10 @@ def estimate_proceeds(
     if shares <= 0:
         raise HttpError(400, "shares must be > 0")
     adapter = get_registry().adapter
-    est = pf.estimate_shares(adapter, ticker, on, 1.0, listing_currency=listing_currency)
+    try:
+        est = pf.estimate_shares(adapter, ticker, on, 1.0, listing_currency=listing_currency)
+    except DataUnavailableError as e:
+        raise HttpError(400, str(e))
     price_eur = float(est["price_local"]) * float(est["eur_per_local"])
     return {
         "ticker": ticker,
