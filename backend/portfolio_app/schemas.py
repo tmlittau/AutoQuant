@@ -481,6 +481,50 @@ class PortfolioRiskOut(Schema):
 
 
 # --------------------------------------------------------------------------- #
+# Backtesting (Phase R2)
+# --------------------------------------------------------------------------- #
+class StrategyInfo(Schema):
+    """One backtestable strategy in the registry."""
+
+    key: str
+    label: str
+    default_rebalance: str
+
+
+class BacktestResultOut(Schema):
+    key: str
+    label: str
+    rebalance: str
+    metrics: RiskMetricsOut
+    equity_curve: list[Optional[float]]            # aligned to the shared `dates`
+    psr: Optional[float] = None                    # probabilistic Sharpe (P true SR > 0)
+    dsr: Optional[float] = None                    # deflated Sharpe (multiple-testing corrected)
+    turnover: Optional[float] = None
+    n_rebalances: int = 0
+
+
+class BacktestRequest(Schema):
+    """Body for ``POST /api/backtest``."""
+
+    asset_class: str = "stocks"
+    strategies: list[str] = []                     # registry keys; empty -> a sensible default set
+    rebalance: str = "M"                           # M | W | Q  (rebalancing strategies)
+    cost_bps: float = 10.0
+    lookback_days: int = 756                       # ~3y of daily bars
+
+
+class BacktestOut(Schema):
+    asset_class: str
+    rebalance: str
+    cost_bps: float
+    n_trials: int
+    trial_sr_std: Optional[float] = None
+    dates: list[str]
+    results: list[BacktestResultOut]
+    cached: bool
+
+
+# --------------------------------------------------------------------------- #
 # Settings
 # --------------------------------------------------------------------------- #
 class SettingsOut(Schema):

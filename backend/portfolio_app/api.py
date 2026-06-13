@@ -29,6 +29,7 @@ from ninja.files import UploadedFile
 from ninja.security import django_auth
 
 import autoquant as aq
+from autoquant import backtest as bt
 from autoquant import metrics as m
 from autoquant import portfolio as pf
 from autoquant import risk as rk
@@ -64,11 +65,14 @@ from .schemas import (
     IndicatorsOut,
     InstrumentQuoteOut,
     InstrumentSearchHit,
+    BacktestOut,
+    BacktestRequest,
     PortfolioPosition,
     PortfolioRiskOut,
     PortfolioSignalsOut,
     PortfolioSnapshotOut,
     PortfolioTotals,
+    StrategyInfo,
     ScoreOut,
     CacheClearedOut,
     SettingsOut,
@@ -593,6 +597,124 @@ def get_portfolio_risk(request, asset_class: str = "stocks", lookback: int = 252
         "dates": [d.date().isoformat() if hasattr(d, "date") else str(d) for d in dd_series.index],
         "rolling_volatility": ser.series_to_list(rolling["volatility"].reindex(dd_series.index)),
         "drawdown": ser.series_to_list(dd_series),
+        "cached": False,
+    }
+    cache.set(cache_key, payload, timeout=10 * 60)
+    return payload
+
+
+# ============================================================================ #
+# Backtesting (Phase R2: walk-forward strategy validation)
+# ============================================================================ #
+# A sensible default comparison set when the caller doesn't name strategies.
+_DEFAULT_BACKTEST_STRATEGIES = [
+    "buy_and_hold", "equal_weight", "inverse_vol", "manual_target",
+]
+
+
+@api.get("/backtest/strategies", response=list[StrategyInfo], tags=["backtest"])
+def list_strategies(request):
+    """Strategies the backtester can run. Grows automatically as later phases
+    (factor tilt, HRP, CVaR, Black-Litterman) register into the engine."""
+    return [
+        {"key": key, "label": meta["label"], "default_rebalance": meta["rebalance"]}
+        for key, meta in bt.STRATEGIES.items()
+    ]
+
+
+@api.post("/backtest", response={200: BacktestOut, 400: ErrorOut}, tags=["backtest"])
+def run_backtest(request, body: BacktestRequest):
+    """Walk-forward backtest of one or more strategies on the asset class's EUR
+    price history, with transaction costs + Deflated/Probabilistic Sharpe.
+
+    Cached 10 min keyed by the full parameter set + tx revision.
+    """
+    asset_class = (body.asset_class or "stocks").lower()
+    if asset_class not in VALID_ASSET_CLASSES:
+        return 400, {"detail": f"asset_class must be one of {VALID_ASSET_CLASSES}"}
+
+    rebalance = body.rebalance if body.rebalance in ("M", "W", "Q") else "M"
+    cost_bps = max(0.0, min(float(body.cost_bps), 200.0))
+    lookback = max(126, min(int(body.lookback_days), 2520))
+    keys = [k for k in (body.strategies or _DEFAULT_BACKTEST_STRATEGIES) if k in bt.STRATEGIES]
+    if not keys:
+        return 400, {"detail": "no valid strategy keys requested"}
+
+    reg = get_registry()
+    adapter = reg.adapter
+    cache_key = (
+        f"backtest:{reg.name}:{asset_class}:{','.join(sorted(keys))}:"
+        f"{rebalance}:{cost_bps}:{lookback}:{_tx_revision()}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    portfolio = _portfolio_dict()
+    if not pf.all_tickers(portfolio, asset_class):
+        return 400, {"detail": f"no {asset_class} holdings to backtest"}
+
+    # Deep-history EUR prices (full window then trimmed to the lookback).
+    prices = rk.eur_price_matrix(
+        adapter, portfolio, asset_class, lookback_days=lookback, full_history=True
+    )
+    if prices.empty or prices.shape[0] < 130:
+        return 400, {"detail": "not enough price history for a backtest"}
+
+    # Manual-target baseline uses the current actual allocation weights.
+    tx_df = repo.build_transactions_df()
+    positions = pf.current_positions(tx_df, portfolio, asset_class=asset_class)
+    target_weights: dict[str, float] = {}
+    if not positions.empty:
+        prices_local = pf.latest_prices_local(adapter, list(positions.index))
+        ccy_map = pf.ticker_to_currency(portfolio, asset_class)
+        fx_rates = pf.fx_rates_for(adapter, ccy_map.values())
+        valued = pf.value_positions(positions, prices_local, ccy_map, fx_rates)
+        w = valued["weight"].astype(float)
+        target_weights = {t: float(v) for t, v in w.items() if v > 0}
+
+    specs = [{"key": k, "rebalance": ("none" if k == "buy_and_hold" else rebalance)} for k in keys]
+    batch = bt.run_strategies(
+        prices, specs, cost_bps=cost_bps, warmup=63, ctx={"target_weights": target_weights}
+    )
+
+    # Shared date axis = the union index of the equity curves (they share it).
+    dates_index = None
+    for res in batch["results"]:
+        if not res["equity_curve"].empty:
+            dates_index = res["equity_curve"].index
+            break
+    dates = (
+        [d.date().isoformat() if hasattr(d, "date") else str(d) for d in dates_index]
+        if dates_index is not None else []
+    )
+
+    results_out = []
+    for res in batch["results"]:
+        curve = res["equity_curve"]
+        aligned = curve.reindex(dates_index) if dates_index is not None else curve
+        results_out.append(
+            {
+                "key": res["key"],
+                "label": res["label"],
+                "rebalance": res["rebalance"],
+                "metrics": {k: ser.safe_float(v) for k, v in res["metrics"].items()},
+                "equity_curve": ser.series_to_list(aligned),
+                "psr": ser.safe_float(res["psr"]),
+                "dsr": ser.safe_float(res["dsr"]),
+                "turnover": ser.safe_float(res["turnover"]),
+                "n_rebalances": int(res["n_rebalances"]),
+            }
+        )
+
+    payload = {
+        "asset_class": asset_class,
+        "rebalance": rebalance,
+        "cost_bps": cost_bps,
+        "n_trials": batch["n_trials"],
+        "trial_sr_std": ser.safe_float(batch["trial_sr_std"]),
+        "dates": dates,
+        "results": results_out,
         "cached": False,
     }
     cache.set(cache_key, payload, timeout=10 * 60)

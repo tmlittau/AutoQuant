@@ -173,6 +173,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backtest/strategies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Strategies
+         * @description Strategies the backtester can run. Grows automatically as later phases
+         *     (factor tilt, HRP, CVaR, Black-Litterman) register into the engine.
+         */
+        get: operations["portfolio_app_api_list_strategies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Backtest
+         * @description Walk-forward backtest of one or more strategies on the asset class's EUR
+         *     price history, with transaction costs + Deflated/Probabilistic Sharpe.
+         *
+         *     Cached 10 min keyed by the full parameter set + tx revision.
+         */
+        post: operations["portfolio_app_api_run_backtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolio/signals": {
         parameters: {
             query?: never;
@@ -936,6 +980,91 @@ export interface components {
             /** Beta */
             beta?: number | null;
         };
+        /**
+         * StrategyInfo
+         * @description One backtestable strategy in the registry.
+         */
+        StrategyInfo: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Default Rebalance */
+            default_rebalance: string;
+        };
+        /** BacktestOut */
+        BacktestOut: {
+            /** Asset Class */
+            asset_class: string;
+            /** Rebalance */
+            rebalance: string;
+            /** Cost Bps */
+            cost_bps: number;
+            /** N Trials */
+            n_trials: number;
+            /** Trial Sr Std */
+            trial_sr_std?: number | null;
+            /** Dates */
+            dates: string[];
+            /** Results */
+            results: components["schemas"]["BacktestResultOut"][];
+            /** Cached */
+            cached: boolean;
+        };
+        /** BacktestResultOut */
+        BacktestResultOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Rebalance */
+            rebalance: string;
+            metrics: components["schemas"]["RiskMetricsOut"];
+            /** Equity Curve */
+            equity_curve: (number | null)[];
+            /** Psr */
+            psr?: number | null;
+            /** Dsr */
+            dsr?: number | null;
+            /** Turnover */
+            turnover?: number | null;
+            /**
+             * N Rebalances
+             * @default 0
+             */
+            n_rebalances: number;
+        };
+        /**
+         * BacktestRequest
+         * @description Body for ``POST /api/backtest``.
+         */
+        BacktestRequest: {
+            /**
+             * Asset Class
+             * @default stocks
+             */
+            asset_class: string;
+            /**
+             * Strategies
+             * @default []
+             */
+            strategies: string[];
+            /**
+             * Rebalance
+             * @default M
+             */
+            rebalance: string;
+            /**
+             * Cost Bps
+             * @default 10
+             */
+            cost_bps: number;
+            /**
+             * Lookback Days
+             * @default 756
+             */
+            lookback_days: number;
+        };
         /** PortfolioSignalsOut */
         PortfolioSignalsOut: {
             /** Cached */
@@ -1668,6 +1797,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioRiskOut"];
+                };
+            };
+        };
+    };
+    portfolio_app_api_list_strategies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyInfo"][];
+                };
+            };
+        };
+    };
+    portfolio_app_api_run_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

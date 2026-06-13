@@ -22,6 +22,7 @@
       match: /^\/portfolio\/diversification/,
     },
     { href: '/portfolio/risk', label: 'Risk', match: /^\/portfolio\/risk/ },
+    { href: '/strategy-lab', label: 'Strategy Lab', match: /^\/strategy-lab/ },
     { href: '/watchlist', label: 'Watchlist', match: /^\/watchlist/ },
     { href: '/transactions', label: 'Transactions', match: /^\/transactions/ },
     { href: '/settings', label: 'Settings', match: /^\/settings/ },

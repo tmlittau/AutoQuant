@@ -348,6 +348,86 @@
         ]
       }
     },
+    "/api/backtest/strategies": {
+      "get": {
+        "operationId": "portfolio_app_api_list_strategies",
+        "summary": "List Strategies",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StrategyInfo"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "description": "Strategies the backtester can run. Grows automatically as later phases\n(factor tilt, HRP, CVaR, Black-Litterman) register into the engine.",
+        "tags": [
+          "backtest"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
+    "/api/backtest": {
+      "post": {
+        "operationId": "portfolio_app_api_run_backtest",
+        "summary": "Run Backtest",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Walk-forward backtest of one or more strategies on the asset class's EUR\nprice history, with transaction costs + Deflated/Probabilistic Sharpe.\n\nCached 10 min keyed by the full parameter set + tx revision.",
+        "tags": [
+          "backtest"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/portfolio/signals": {
       "get": {
         "operationId": "portfolio_app_api_get_portfolio_signals",
@@ -2617,6 +2697,205 @@
           }
         },
         "title": "RiskMetricsOut",
+        "type": "object"
+      },
+      "StrategyInfo": {
+        "description": "One backtestable strategy in the registry.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "default_rebalance": {
+            "title": "Default Rebalance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "default_rebalance"
+        ],
+        "title": "StrategyInfo",
+        "type": "object"
+      },
+      "BacktestOut": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "rebalance": {
+            "title": "Rebalance",
+            "type": "string"
+          },
+          "cost_bps": {
+            "title": "Cost Bps",
+            "type": "number"
+          },
+          "n_trials": {
+            "title": "N Trials",
+            "type": "integer"
+          },
+          "trial_sr_std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Sr Std"
+          },
+          "dates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestResultOut"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asset_class",
+          "rebalance",
+          "cost_bps",
+          "n_trials",
+          "dates",
+          "results",
+          "cached"
+        ],
+        "title": "BacktestOut",
+        "type": "object"
+      },
+      "BacktestResultOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "rebalance": {
+            "title": "Rebalance",
+            "type": "string"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RiskMetricsOut"
+          },
+          "equity_curve": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Equity Curve",
+            "type": "array"
+          },
+          "psr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psr"
+          },
+          "dsr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dsr"
+          },
+          "turnover": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnover"
+          },
+          "n_rebalances": {
+            "default": 0,
+            "title": "N Rebalances",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "rebalance",
+          "metrics",
+          "equity_curve"
+        ],
+        "title": "BacktestResultOut",
+        "type": "object"
+      },
+      "BacktestRequest": {
+        "description": "Body for ``POST /api/backtest``.",
+        "properties": {
+          "asset_class": {
+            "default": "stocks",
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "strategies": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Strategies",
+            "type": "array"
+          },
+          "rebalance": {
+            "default": "M",
+            "title": "Rebalance",
+            "type": "string"
+          },
+          "cost_bps": {
+            "default": 10.0,
+            "title": "Cost Bps",
+            "type": "number"
+          },
+          "lookback_days": {
+            "default": 756,
+            "title": "Lookback Days",
+            "type": "integer"
+          }
+        },
+        "title": "BacktestRequest",
         "type": "object"
       },
       "PortfolioSignalsOut": {
