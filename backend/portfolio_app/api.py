@@ -32,6 +32,7 @@ import autoquant as aq
 from autoquant import backtest as bt
 from autoquant import metrics as m
 from autoquant import portfolio as pf
+from autoquant import regime as rg
 from autoquant import risk as rk
 from autoquant import signals as sg
 from autoquant.adapters.base import DataUnavailableError
@@ -72,6 +73,7 @@ from .schemas import (
     PortfolioSignalsOut,
     PortfolioSnapshotOut,
     PortfolioTotals,
+    RegimeOut,
     StrategyInfo,
     ScoreOut,
     CacheClearedOut,
@@ -722,12 +724,90 @@ def run_backtest(request, body: BacktestRequest):
 
 
 # ============================================================================ #
+# Market regime (Phase R3: HMM calm / volatile / crisis)
+# ============================================================================ #
+def _market_regime(adapter, *, lookback: int = 500) -> dict:
+    """Detect + cache the current market regime from the ^GSPC (EUR) return
+    series. Cached 1h. Returns the regime dict (see autoquant.regime)."""
+    reg = get_registry()
+    cache_key = f"regime:{reg.name}:{lookback}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    name, rets = _benchmark_returns(adapter, lookback)
+    state = rg.detect_regime(rets, n_states=3)
+    state["benchmark"] = name
+    cache.set(cache_key, state, timeout=60 * 60)
+    return state
+
+
+def _regime_payload(state: dict) -> dict:
+    """Serialise a regime dict to the RegimeOut shape."""
+    return {
+        "label": state.get("label", "unknown"),
+        "confidence": ser.safe_float(state.get("confidence")),
+        "n_states": int(state.get("n_states", 0)),
+        "n_obs": int(state.get("n_obs", 0)),
+        "benchmark": state.get("benchmark"),
+        "states": [
+            {
+                "label": s["label"],
+                "mean_return_daily": ser.safe_float(s.get("mean_return_daily")),
+                "volatility_annual": ser.safe_float(s.get("volatility_annual")),
+                "probability": ser.safe_float(s.get("probability")),
+            }
+            for s in state.get("states", [])
+        ],
+        "cached": False,
+    }
+
+
+def _signal_item(ticker: str, row) -> dict:
+    """Map a watchlist_signals row to the WatchlistScoreOut shape (incl. the R3
+    factor decomposition + method)."""
+    return {
+        "ticker": ticker,
+        "name": row.get("name", ticker),
+        "group": row.get("group", "") or "",
+        "currency": row.get("currency", "USD") or "USD",
+        "status": row.get("status", "ok"),
+        "recommendation": row.get("recommendation", "-"),
+        "method": row.get("method", "factor") or "factor",
+        "last_price": ser.safe_float(row.get("last_price")),
+        "roc_20d_pct": ser.safe_float(row.get("roc_20d_%")),
+        "rsi_14": ser.safe_float(row.get("rsi_14")),
+        "zscore_20": ser.safe_float(row.get("zscore_20")),
+        "beta": ser.safe_float(row.get("beta")),
+        "trend": ser.safe_float(row.get("trend")),
+        "momentum": ser.safe_float(row.get("momentum")),
+        "macd": ser.safe_float(row.get("macd")),
+        "mean_reversion": ser.safe_float(row.get("mean_reversion")),
+        "f_momentum": ser.safe_float(row.get("f_momentum")),
+        "f_trend_quality": ser.safe_float(row.get("f_trend_quality")),
+        "f_low_vol": ser.safe_float(row.get("f_low_vol")),
+        "f_mean_reversion": ser.safe_float(row.get("f_mean_reversion")),
+        "f_short_reversal": ser.safe_float(row.get("f_short_reversal")),
+        "score": ser.safe_float(row.get("score")),
+        "signal": row.get("signal"),
+    }
+
+
+@api.get("/regime", response=RegimeOut, tags=["portfolio"])
+def get_regime(request):
+    """Current market regime (calm / volatile / crisis) from a 3-state Gaussian
+    HMM on the benchmark's EUR returns. Drives the factor-weight tilt."""
+    state = _market_regime(get_registry().adapter)
+    return _regime_payload(state)
+
+
+# ============================================================================ #
 # Portfolio signals (BUY / HOLD / TRIM for held names)
 # ============================================================================ #
 @api.get("/portfolio/signals", response=PortfolioSignalsOut, tags=["portfolio"])
 def get_portfolio_signals(
     request,
     asset_class: str = "stocks",
+    method: str = sg.DEFAULT_METHOD,
     force: bool = False,
 ):
     """BUY / HOLD / TRIM scores for every portfolio holding in ``asset_class``.
@@ -740,96 +820,80 @@ def get_portfolio_signals(
     deposit. Cached 10 min keyed by (adapter, asset_class, tx revision).
     """
     _assert_asset_class(asset_class)
+    method = "legacy" if method == "legacy" else "factor"
 
     reg = get_registry()
     adapter = reg.adapter
-    cache_key = f"pf-signals:{reg.name}:{asset_class}:{_tx_revision()}"
+    cache_key = f"pf-signals:{reg.name}:{asset_class}:{method}:{_tx_revision()}"
 
     if not force:
         cached = cache.get(cache_key)
         if cached is not None:
-            return {"cached": True, "asset_class": asset_class, "items": cached}
+            return {**cached, "cached": True}
 
     portfolio = _portfolio_dict()
-    # Reuse the watchlist scorer for a per-holding pass -- it's resilient to
-    # rate-limits and unknown symbols and returns the exact shape the SPA
-    # already knows how to render.
-    df = sg.watchlist_signals(adapter, {**portfolio})
-    # watchlist_signals walks every ticker in the dict; restrict to the chosen
-    # asset class via a post-filter (cheap; the I/O is the per-ticker fetch).
+
+    # Regime conditions the factor weights (factor mode only).
+    regime_state = _market_regime(adapter) if method == "factor" else {"label": "unknown"}
+    regime_mult = rg.regime_factor_mult(regime_state.get("label", "unknown")) if method == "factor" else None
+    _bench_name, bench_rets = _benchmark_returns(adapter, 252)
+
+    # Reuse the watchlist scorer for a per-holding pass -- resilient to
+    # rate-limits / unknown symbols, returns the exact shape the SPA renders.
+    df = sg.watchlist_signals(
+        adapter, {**portfolio}, method=method,
+        benchmark=(bench_rets if not bench_rets.empty else None),
+        regime_mult=regime_mult,
+    )
     keep = set(pf.all_tickers(portfolio, asset_class=asset_class))
     df = df.loc[df.index.isin(keep)]
 
-    items = []
-    for ticker, row in df.iterrows():
-        items.append(
-            {
-                "ticker": ticker,
-                "name": row.get("name", ticker),
-                "group": row.get("group", ""),
-                "currency": row.get("currency", "USD"),
-                "status": row.get("status", "ok"),
-                "recommendation": row.get("recommendation", "-"),
-                "last_price": ser.safe_float(row.get("last_price")),
-                "roc_20d_pct": ser.safe_float(row.get("roc_20d_%")),
-                "rsi_14": ser.safe_float(row.get("rsi_14")),
-                "zscore_20": ser.safe_float(row.get("zscore_20")),
-                "trend": ser.safe_float(row.get("trend")),
-                "momentum": ser.safe_float(row.get("momentum")),
-                "macd": ser.safe_float(row.get("macd")),
-                "mean_reversion": ser.safe_float(row.get("mean_reversion")),
-                "score": ser.safe_float(row.get("score")),
-                "signal": row.get("signal"),
-            }
-        )
-
-    cache.set(cache_key, items, timeout=10 * 60)
-    return {"cached": False, "asset_class": asset_class, "items": items}
+    items = [_signal_item(ticker, row) for ticker, row in df.iterrows()]
+    payload = {
+        "cached": False,
+        "asset_class": asset_class,
+        "items": items,
+        "regime": _regime_payload(regime_state) if method == "factor" else None,
+    }
+    cache.set(cache_key, payload, timeout=10 * 60)
+    return payload
 
 
 # ============================================================================ #
 # Watchlist signals
 # ============================================================================ #
 @api.get("/watchlist/signals", response=WatchlistOut, tags=["watchlist"])
-def get_watchlist_signals(request, force: bool = False):
+def get_watchlist_signals(request, method: str = sg.DEFAULT_METHOD, force: bool = False):
     """BUY / WATCH / AVOID scores for every name on the watchlist."""
+    method = "legacy" if method == "legacy" else "factor"
     reg = get_registry()
     adapter = reg.adapter
-    cache_key = f"watchlist:{reg.name}"
+    cache_key = f"watchlist:{reg.name}:{method}"
 
     if not force:
         cached = cache.get(cache_key)
         if cached is not None:
-            return {"cached": True, "items": cached}
+            return {**cached, "cached": True}
 
     wl = _watchlist_dict()
-    df = sg.watchlist_signals(adapter, wl)
+    regime_state = _market_regime(adapter) if method == "factor" else {"label": "unknown"}
+    regime_mult = rg.regime_factor_mult(regime_state.get("label", "unknown")) if method == "factor" else None
+    _bench_name, bench_rets = _benchmark_returns(adapter, 252)
 
-    items = []
-    for ticker, row in df.iterrows():
-        items.append(
-            {
-                "ticker": ticker,
-                "name": row.get("name", ticker),
-                "group": row.get("group", ""),
-                "currency": row.get("currency", "USD"),
-                "status": row.get("status", "ok"),
-                "recommendation": row.get("recommendation", "-"),
-                "last_price": ser.safe_float(row.get("last_price")),
-                "roc_20d_pct": ser.safe_float(row.get("roc_20d_%")),
-                "rsi_14": ser.safe_float(row.get("rsi_14")),
-                "zscore_20": ser.safe_float(row.get("zscore_20")),
-                "trend": ser.safe_float(row.get("trend")),
-                "momentum": ser.safe_float(row.get("momentum")),
-                "macd": ser.safe_float(row.get("macd")),
-                "mean_reversion": ser.safe_float(row.get("mean_reversion")),
-                "score": ser.safe_float(row.get("score")),
-                "signal": row.get("signal"),
-            }
-        )
+    df = sg.watchlist_signals(
+        adapter, wl, method=method,
+        benchmark=(bench_rets if not bench_rets.empty else None),
+        regime_mult=regime_mult,
+    )
 
-    cache.set(cache_key, items, timeout=10 * 60)
-    return {"cached": False, "items": items}
+    items = [_signal_item(ticker, row) for ticker, row in df.iterrows()]
+    payload = {
+        "cached": False,
+        "items": items,
+        "regime": _regime_payload(regime_state) if method == "factor" else None,
+    }
+    cache.set(cache_key, payload, timeout=10 * 60)
+    return payload
 
 
 # ============================================================================ #
@@ -1807,21 +1871,48 @@ def get_instrument_indicators(
 
 
 @api.get("/instruments/{ticker}/score", response=ScoreOut, tags=["instruments"])
-def get_instrument_score(request, ticker: str):
-    """Composite BUY/HOLD/TRIM quant score for a single ticker."""
+def get_instrument_score(request, ticker: str, method: str = sg.DEFAULT_METHOD):
+    """Composite BUY/HOLD/TRIM quant score for a single ticker.
+
+    ``method=factor`` (default) returns the price-only factor decomposition
+    (momentum / trend-quality / low-vol / mean-reversion / short-reversal),
+    regime-conditioned; ``method=legacy`` returns the original blend."""
+    method = "legacy" if method == "legacy" else "factor"
     adapter = get_registry().adapter
-    prices = adapter.get_daily(ticker)["close"]
-    scored = sg.score_series(prices)
+    # Factor mode needs >1y for 12-1 momentum -> pull the full window.
+    prices = adapter.get_daily(
+        ticker, outputsize=("full" if method == "factor" else "compact")
+    )["close"]
+
+    if method == "factor":
+        regime_state = _market_regime(adapter)
+        regime_mult = rg.regime_factor_mult(regime_state.get("label", "unknown"))
+        _bn, bench = _benchmark_returns(adapter, 252)
+        scored = sg.score_series(
+            prices, method="factor",
+            benchmark=(bench if not bench.empty else None),
+            regime_mult=regime_mult,
+        )
+    else:
+        scored = sg.score_series(prices, method="legacy")
+
     return {
         "ticker": ticker,
+        "method": scored.get("method", method),
         "last_price": ser.safe_float(scored.get("price_usd")),
         "roc_20d_pct": ser.safe_float(scored.get("roc_20d_%")),
         "rsi_14": ser.safe_float(scored.get("rsi_14")),
         "zscore_20": ser.safe_float(scored.get("zscore_20")),
+        "beta": ser.safe_float(scored.get("beta")),
         "trend": ser.safe_float(scored.get("trend")),
         "momentum": ser.safe_float(scored.get("momentum")),
         "macd": ser.safe_float(scored.get("macd")),
         "mean_reversion": ser.safe_float(scored.get("mean_reversion")),
+        "f_momentum": ser.safe_float(scored.get("f_momentum")),
+        "f_trend_quality": ser.safe_float(scored.get("f_trend_quality")),
+        "f_low_vol": ser.safe_float(scored.get("f_low_vol")),
+        "f_mean_reversion": ser.safe_float(scored.get("f_mean_reversion")),
+        "f_short_reversal": ser.safe_float(scored.get("f_short_reversal")),
         "score": ser.safe_float(scored.get("score")),
         "signal": scored.get("signal"),
     }

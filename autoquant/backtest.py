@@ -67,6 +67,29 @@ def _manual_target(hist: pd.DataFrame, cols: list, ctx: dict) -> pd.Series:
     return w / w.sum()
 
 
+def _factor_tilt(hist: pd.DataFrame, cols: list, ctx: dict) -> pd.Series:
+    """Tilt toward names with high cross-sectional factor composites (R3).
+
+    Reconstructs a price proxy from the return history (factors are
+    scale-invariant), computes the cross-sectional factor composite across the
+    universe, and overweights the positive-composite names (long-only). Falls
+    back to equal weight when no name scores positively (e.g. early in the
+    window before 12-1 momentum has enough history)."""
+    from . import factors
+
+    if len(hist) < 30:
+        return _equal_weight(hist, cols, ctx)
+    prices = (1.0 + hist[cols]).cumprod()
+    raw = {t: factors.compute_raw_factors(prices[t]) for t in cols}
+    cs = factors.cross_sectional_scores(raw, regime_mult=ctx.get("regime_mult"))
+    if cs.empty or "score" not in cs:
+        return _equal_weight(hist, cols, ctx)
+    pos = cs["score"].reindex(cols).fillna(0.0).clip(lower=0.0)
+    if pos.sum() <= 0:
+        return _equal_weight(hist, cols, ctx)
+    return pos / pos.sum()
+
+
 # key -> (weight_fn, default_rebalance, human label, needs-no-rebalance flag)
 STRATEGIES: dict[str, dict] = {
     "buy_and_hold": {
@@ -88,6 +111,10 @@ STRATEGIES: dict[str, dict] = {
     "manual_target": {
         "fn": _manual_target, "rebalance": "M",
         "label": "Manual target weights",
+    },
+    "factor_tilt": {
+        "fn": _factor_tilt, "rebalance": "M",
+        "label": "Factor tilt (momentum / trend / low-vol / reversal)",
     },
 }
 

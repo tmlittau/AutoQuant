@@ -428,6 +428,34 @@
         ]
       }
     },
+    "/api/regime": {
+      "get": {
+        "operationId": "portfolio_app_api_get_regime",
+        "summary": "Get Regime",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegimeOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Current market regime (calm / volatile / crisis) from a 3-state Gaussian\nHMM on the benchmark's EUR returns. Drives the factor-weight tilt.",
+        "tags": [
+          "portfolio"
+        ],
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/portfolio/signals": {
       "get": {
         "operationId": "portfolio_app_api_get_portfolio_signals",
@@ -439,6 +467,16 @@
             "schema": {
               "default": "stocks",
               "title": "Asset Class",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "default": "factor",
+              "title": "Method",
               "type": "string"
             },
             "required": false
@@ -482,6 +520,16 @@
         "operationId": "portfolio_app_api_get_watchlist_signals",
         "summary": "Get Watchlist Signals",
         "parameters": [
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "default": "factor",
+              "title": "Method",
+              "type": "string"
+            },
+            "required": false
+          },
           {
             "in": "query",
             "name": "force",
@@ -1516,6 +1564,16 @@
               "type": "string"
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "schema": {
+              "default": "factor",
+              "title": "Method",
+              "type": "string"
+            },
+            "required": false
           }
         ],
         "responses": {
@@ -1530,7 +1588,7 @@
             }
           }
         },
-        "description": "Composite BUY/HOLD/TRIM quant score for a single ticker.",
+        "description": "Composite BUY/HOLD/TRIM quant score for a single ticker.\n\n``method=factor`` (default) returns the price-only factor decomposition\n(momentum / trend-quality / low-vol / mean-reversion / short-reversal),\nregime-conditioned; ``method=legacy`` returns the original blend.",
         "tags": [
           "instruments"
         ],
@@ -2898,6 +2956,110 @@
         "title": "BacktestRequest",
         "type": "object"
       },
+      "RegimeOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "n_states": {
+            "default": 0,
+            "title": "N States",
+            "type": "integer"
+          },
+          "n_obs": {
+            "default": 0,
+            "title": "N Obs",
+            "type": "integer"
+          },
+          "benchmark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark"
+          },
+          "states": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RegimeStateOut"
+            },
+            "title": "States",
+            "type": "array"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "RegimeOut",
+        "type": "object"
+      },
+      "RegimeStateOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "mean_return_daily": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Return Daily"
+          },
+          "volatility_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility Annual"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probability"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "RegimeStateOut",
+        "type": "object"
+      },
       "PortfolioSignalsOut": {
         "properties": {
           "cached": {
@@ -2914,6 +3076,16 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "regime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RegimeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2926,6 +3098,61 @@
       },
       "WatchlistScoreOut": {
         "properties": {
+          "f_momentum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Momentum"
+          },
+          "f_trend_quality": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Trend Quality"
+          },
+          "f_low_vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Low Vol"
+          },
+          "f_mean_reversion": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Mean Reversion"
+          },
+          "f_short_reversal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Short Reversal"
+          },
           "ticker": {
             "title": "Ticker",
             "type": "string"
@@ -2948,6 +3175,11 @@
           },
           "recommendation": {
             "title": "Recommendation",
+            "type": "string"
+          },
+          "method": {
+            "default": "factor",
+            "title": "Method",
             "type": "string"
           },
           "last_price": {
@@ -2993,6 +3225,17 @@
               }
             ],
             "title": "Zscore 20"
+          },
+          "beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta"
           },
           "trend": {
             "anyOf": [
@@ -3084,6 +3327,16 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "regime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RegimeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4045,8 +4298,68 @@
       },
       "ScoreOut": {
         "properties": {
+          "f_momentum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Momentum"
+          },
+          "f_trend_quality": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Trend Quality"
+          },
+          "f_low_vol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Low Vol"
+          },
+          "f_mean_reversion": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Mean Reversion"
+          },
+          "f_short_reversal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Short Reversal"
+          },
           "ticker": {
             "title": "Ticker",
+            "type": "string"
+          },
+          "method": {
+            "default": "factor",
+            "title": "Method",
             "type": "string"
           },
           "last_price": {
@@ -4092,6 +4405,17 @@
               }
             ],
             "title": "Zscore 20"
+          },
+          "beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta"
           },
           "trend": {
             "anyOf": [

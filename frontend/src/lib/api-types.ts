@@ -217,6 +217,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/regime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Regime
+         * @description Current market regime (calm / volatile / crisis) from a 3-state Gaussian
+         *     HMM on the benchmark's EUR returns. Drives the factor-weight tilt.
+         */
+        get: operations["portfolio_app_api_get_regime"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolio/signals": {
         parameters: {
             query?: never;
@@ -603,6 +624,10 @@ export interface paths {
         /**
          * Get Instrument Score
          * @description Composite BUY/HOLD/TRIM quant score for a single ticker.
+         *
+         *     ``method=factor`` (default) returns the price-only factor decomposition
+         *     (momentum / trend-quality / low-vol / mean-reversion / short-reversal),
+         *     regime-conditioned; ``method=legacy`` returns the original blend.
          */
         get: operations["portfolio_app_api_get_instrument_score"];
         put?: never;
@@ -1065,6 +1090,46 @@ export interface components {
              */
             lookback_days: number;
         };
+        /** RegimeOut */
+        RegimeOut: {
+            /** Label */
+            label: string;
+            /** Confidence */
+            confidence?: number | null;
+            /**
+             * N States
+             * @default 0
+             */
+            n_states: number;
+            /**
+             * N Obs
+             * @default 0
+             */
+            n_obs: number;
+            /** Benchmark */
+            benchmark?: string | null;
+            /**
+             * States
+             * @default []
+             */
+            states: components["schemas"]["RegimeStateOut"][];
+            /**
+             * Cached
+             * @default false
+             */
+            cached: boolean;
+        };
+        /** RegimeStateOut */
+        RegimeStateOut: {
+            /** Label */
+            label: string;
+            /** Mean Return Daily */
+            mean_return_daily?: number | null;
+            /** Volatility Annual */
+            volatility_annual?: number | null;
+            /** Probability */
+            probability?: number | null;
+        };
         /** PortfolioSignalsOut */
         PortfolioSignalsOut: {
             /** Cached */
@@ -1073,9 +1138,20 @@ export interface components {
             asset_class: string;
             /** Items */
             items: components["schemas"]["WatchlistScoreOut"][];
+            regime?: components["schemas"]["RegimeOut"] | null;
         };
         /** WatchlistScoreOut */
         WatchlistScoreOut: {
+            /** F Momentum */
+            f_momentum?: number | null;
+            /** F Trend Quality */
+            f_trend_quality?: number | null;
+            /** F Low Vol */
+            f_low_vol?: number | null;
+            /** F Mean Reversion */
+            f_mean_reversion?: number | null;
+            /** F Short Reversal */
+            f_short_reversal?: number | null;
             /** Ticker */
             ticker: string;
             /** Name */
@@ -1088,6 +1164,11 @@ export interface components {
             status: string;
             /** Recommendation */
             recommendation: string;
+            /**
+             * Method
+             * @default factor
+             */
+            method: string;
             /** Last Price */
             last_price?: number | null;
             /** Roc 20D Pct */
@@ -1096,6 +1177,8 @@ export interface components {
             rsi_14?: number | null;
             /** Zscore 20 */
             zscore_20?: number | null;
+            /** Beta */
+            beta?: number | null;
             /** Trend */
             trend?: number | null;
             /** Momentum */
@@ -1115,6 +1198,7 @@ export interface components {
             cached: boolean;
             /** Items */
             items: components["schemas"]["WatchlistScoreOut"][];
+            regime?: components["schemas"]["RegimeOut"] | null;
         };
         /** TransactionOut */
         TransactionOut: {
@@ -1488,8 +1572,23 @@ export interface components {
         };
         /** ScoreOut */
         ScoreOut: {
+            /** F Momentum */
+            f_momentum?: number | null;
+            /** F Trend Quality */
+            f_trend_quality?: number | null;
+            /** F Low Vol */
+            f_low_vol?: number | null;
+            /** F Mean Reversion */
+            f_mean_reversion?: number | null;
+            /** F Short Reversal */
+            f_short_reversal?: number | null;
             /** Ticker */
             ticker: string;
+            /**
+             * Method
+             * @default factor
+             */
+            method: string;
             /** Last Price */
             last_price?: number | null;
             /** Roc 20D Pct */
@@ -1498,6 +1597,8 @@ export interface components {
             rsi_14?: number | null;
             /** Zscore 20 */
             zscore_20?: number | null;
+            /** Beta */
+            beta?: number | null;
             /** Trend */
             trend?: number | null;
             /** Momentum */
@@ -1854,10 +1955,31 @@ export interface operations {
             };
         };
     };
+    portfolio_app_api_get_regime: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegimeOut"];
+                };
+            };
+        };
+    };
     portfolio_app_api_get_portfolio_signals: {
         parameters: {
             query?: {
                 asset_class?: string;
+                method?: string;
                 force?: boolean;
             };
             header?: never;
@@ -1880,6 +2002,7 @@ export interface operations {
     portfolio_app_api_get_watchlist_signals: {
         parameters: {
             query?: {
+                method?: string;
                 force?: boolean;
             };
             header?: never;
@@ -2445,7 +2568,9 @@ export interface operations {
     };
     portfolio_app_api_get_instrument_score: {
         parameters: {
-            query?: never;
+            query?: {
+                method?: string;
+            };
             header?: never;
             path: {
                 ticker: string;

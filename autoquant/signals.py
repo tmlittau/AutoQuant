@@ -17,10 +17,12 @@ Sub-signals
 
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
-from . import metrics
+from . import factors, metrics
 from .adapters.base import MarketDataAdapter
 
 DISCLAIMER = (
@@ -32,13 +34,69 @@ WEIGHTS = {"trend": 0.35, "momentum": 0.30, "macd": 0.15, "mean_reversion": 0.20
 BUY_THRESHOLD = 0.35
 TRIM_THRESHOLD = -0.35
 
+DEFAULT_METHOD = "factor"   # the R3 upgrade; "legacy" stays available for A/B
+
 
 def _last(series: pd.Series) -> float:
     clean = series.dropna()
     return float(clean.iloc[-1]) if not clean.empty else float("nan")
 
 
-def score_series(prices: pd.Series) -> dict:
+def score_series(
+    prices: pd.Series,
+    method: str = DEFAULT_METHOD,
+    benchmark: Optional[pd.Series] = None,
+    regime_mult: Optional[dict] = None,
+) -> dict:
+    """Score one price series.
+
+    ``method="factor"`` (default) uses the R3 price-only factor model
+    (momentum / trend-quality / low-vol / mean-reversion / short-reversal),
+    optionally regime-conditioned via ``regime_mult``. ``method="legacy"`` uses
+    the original four-indicator blend. Both return a dict with ``score`` ∈
+    [-1,1] + a BUY/HOLD/TRIM ``signal`` and the same axis fields
+    (``momentum`` / ``mean_reversion`` / ``trend``) so existing consumers (the
+    signal scatter, tables) keep working in either mode.
+    """
+    if method == "legacy":
+        return _legacy_score_series(prices)
+    return _factor_score_series(prices, benchmark, regime_mult)
+
+
+def _factor_score_series(
+    prices: pd.Series,
+    benchmark: Optional[pd.Series] = None,
+    regime_mult: Optional[dict] = None,
+) -> dict:
+    """Factor-model scoring, mapped onto the shared output contract."""
+    fs = factors.factor_score_series(
+        prices, benchmark=benchmark, regime_mult=regime_mult
+    )
+    mom = fs["momentum_12_1"]
+    return {
+        "price_usd": fs["last_price"],
+        "roc_20d_%": float(mom * 100.0) if not np.isnan(mom) else float("nan"),
+        "rsi_14": float("nan"),          # not part of the factor model
+        "zscore_20": fs["zscore_20"],
+        # axis fields the scatter/tables read -- mapped from the factor scores.
+        "trend": fs["f_trend_quality"],
+        "momentum": fs["f_momentum"],
+        "macd": fs["f_short_reversal"],
+        "mean_reversion": fs["f_mean_reversion"],
+        # explicit factor decomposition (the richer breakdown the Stock view shows)
+        "f_momentum": fs["f_momentum"],
+        "f_trend_quality": fs["f_trend_quality"],
+        "f_low_vol": fs["f_low_vol"],
+        "f_mean_reversion": fs["f_mean_reversion"],
+        "f_short_reversal": fs["f_short_reversal"],
+        "beta": fs["beta"],
+        "method": "factor",
+        "score": fs["score"],
+        "signal": fs["signal"],
+    }
+
+
+def _legacy_score_series(prices: pd.Series) -> dict:
     """Compute the sub-signals, composite score and stance for one price series."""
     close = prices.dropna()
     price = _last(close)
@@ -86,26 +144,45 @@ def score_series(prices: pd.Series) -> dict:
         "momentum": momentum_sig,
         "macd": macd_sig,
         "mean_reversion": mean_rev,
+        # factor-decomposition fields are absent in legacy mode.
+        "f_momentum": None,
+        "f_trend_quality": None,
+        "f_low_vol": None,
+        "f_mean_reversion": None,
+        "f_short_reversal": None,
+        "beta": float("nan"),
+        "method": "legacy",
         "score": composite,
         "signal": stance,
     }
 
 
-def portfolio_signals(adapter: MarketDataAdapter, portfolio: dict) -> pd.DataFrame:
+def portfolio_signals(
+    adapter: MarketDataAdapter,
+    portfolio: dict,
+    method: str = DEFAULT_METHOD,
+    benchmark: Optional[pd.Series] = None,
+    regime_mult: Optional[dict] = None,
+) -> pd.DataFrame:
     """Score every holding in the portfolio; one row per ticker."""
     from .portfolio import all_tickers, ticker_to_group, ticker_to_name
 
     groups = ticker_to_group(portfolio)
     names = ticker_to_name(portfolio)
 
+    outputsize = "full" if method == "factor" else "compact"
     rows = {}
     for ticker in all_tickers(portfolio):
-        prices = adapter.get_daily(ticker)["close"]
-        rows[ticker] = {"group": groups.get(ticker), "name": names.get(ticker), **score_series(prices)}
+        prices = adapter.get_daily(ticker, outputsize=outputsize)["close"]
+        rows[ticker] = {
+            "group": groups.get(ticker),
+            "name": names.get(ticker),
+            **score_series(prices, method=method, benchmark=benchmark, regime_mult=regime_mult),
+        }
 
     df = pd.DataFrame(rows).T
     df.index.name = "ticker"
-    numeric = [c for c in df.columns if c not in ("group", "name", "signal")]
+    numeric = [c for c in df.columns if c not in ("group", "name", "signal", "method")]
     df[numeric] = df[numeric].apply(pd.to_numeric)
     return df.sort_values("score", ascending=False)
 
@@ -123,6 +200,9 @@ def watchlist_signals(
     adapter: MarketDataAdapter,
     watchlist: dict,
     skip_errors: bool = True,
+    method: str = DEFAULT_METHOD,
+    benchmark: Optional[pd.Series] = None,
+    regime_mult: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Score every name in a watchlist and recommend BUY / WATCH / AVOID.
 
@@ -140,12 +220,17 @@ def watchlist_signals(
     names = ticker_to_name(watchlist)
     currencies = ticker_to_currency(watchlist)
 
+    # Factor mode needs >1y of history for 12-1 momentum; the compact window
+    # (~250 sessions) is one bar short, which would silently zero the momentum
+    # factor. Pull the full window in factor mode (adapter-cached, one fetch).
+    outputsize = "full" if method == "factor" else "compact"
+
     rows = {}
     for ticker in all_tickers(watchlist):
         base = {"group": groups.get(ticker), "name": names.get(ticker), "currency": currencies.get(ticker)}
         try:
-            prices = adapter.get_daily(ticker)["close"]
-            scored = score_series(prices)
+            prices = adapter.get_daily(ticker, outputsize=outputsize)["close"]
+            scored = score_series(prices, method=method, benchmark=benchmark, regime_mult=regime_mult)
             scored["last_price"] = scored.pop("price_usd")  # currency-neutral label
             rows[ticker] = {
                 **base,
@@ -164,7 +249,7 @@ def watchlist_signals(
 
     df = pd.DataFrame(rows).T
     df.index.name = "ticker"
-    numeric = [c for c in df.columns if c not in ("group", "name", "currency", "signal", "recommendation", "status")]
+    numeric = [c for c in df.columns if c not in ("group", "name", "currency", "signal", "recommendation", "status", "method")]
     for col in numeric:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     if "score" in df.columns:

@@ -342,12 +342,24 @@ class IndicatorsOut(Schema):
     data: list[list[Optional[float]]]
 
 
-class ScoreOut(Schema):
+# Factor-decomposition fields shared by the score + signal schemas (all None in
+# legacy mode, populated in factor mode).
+class FactorScores(Schema):
+    f_momentum: Optional[float] = None
+    f_trend_quality: Optional[float] = None
+    f_low_vol: Optional[float] = None
+    f_mean_reversion: Optional[float] = None
+    f_short_reversal: Optional[float] = None
+
+
+class ScoreOut(FactorScores):
     ticker: str
+    method: str = "factor"
     last_price: Optional[float] = None
     roc_20d_pct: Optional[float] = None
     rsi_14: Optional[float] = None
     zscore_20: Optional[float] = None
+    beta: Optional[float] = None
     trend: Optional[float] = None
     momentum: Optional[float] = None
     macd: Optional[float] = None
@@ -396,17 +408,19 @@ class HoldingPositionOut(Schema):
 # --------------------------------------------------------------------------- #
 # Watchlist
 # --------------------------------------------------------------------------- #
-class WatchlistScoreOut(Schema):
+class WatchlistScoreOut(FactorScores):
     ticker: str
     name: str
     group: str
     currency: str
     status: str           # 'ok' | 'rate-limited' | 'no-data'
     recommendation: str   # 'BUY' | 'WATCH' | 'AVOID' | '-'
+    method: str = "factor"
     last_price: Optional[float] = None
     roc_20d_pct: Optional[float] = None
     rsi_14: Optional[float] = None
     zscore_20: Optional[float] = None
+    beta: Optional[float] = None
     trend: Optional[float] = None
     momentum: Optional[float] = None
     macd: Optional[float] = None
@@ -415,9 +429,30 @@ class WatchlistScoreOut(Schema):
     signal: Optional[str] = None
 
 
+# --------------------------------------------------------------------------- #
+# Market regime (Phase R3)
+# --------------------------------------------------------------------------- #
+class RegimeStateOut(Schema):
+    label: str                          # calm | volatile | crisis
+    mean_return_daily: Optional[float] = None
+    volatility_annual: Optional[float] = None
+    probability: Optional[float] = None
+
+
+class RegimeOut(Schema):
+    label: str                          # current regime (or 'unknown')
+    confidence: Optional[float] = None
+    n_states: int = 0
+    n_obs: int = 0
+    benchmark: Optional[str] = None
+    states: list[RegimeStateOut] = []
+    cached: bool = False
+
+
 class WatchlistOut(Schema):
     cached: bool
     items: list[WatchlistScoreOut]
+    regime: Optional[RegimeOut] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -427,6 +462,7 @@ class PortfolioSignalsOut(Schema):
     cached: bool
     asset_class: str
     items: list[WatchlistScoreOut]
+    regime: Optional[RegimeOut] = None
 
 
 # --------------------------------------------------------------------------- #

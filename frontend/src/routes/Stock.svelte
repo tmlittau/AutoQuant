@@ -34,14 +34,21 @@
   };
   type Score = {
     ticker: string;
+    method?: string | null;
     last_price?: number | null;
     roc_20d_pct?: number | null;
     rsi_14?: number | null;
     zscore_20?: number | null;
+    beta?: number | null;
     trend?: number | null;
     momentum?: number | null;
     macd?: number | null;
     mean_reversion?: number | null;
+    f_momentum?: number | null;
+    f_trend_quality?: number | null;
+    f_low_vol?: number | null;
+    f_mean_reversion?: number | null;
+    f_short_reversal?: number | null;
     score?: number | null;
     signal?: string | null;
   };
@@ -54,6 +61,7 @@
 
   let quote = $state<Quote | null>(null);
   let score = $state<Score | null>(null);
+  let regime = $state<{ label: string; confidence?: number | null } | null>(null);
   let indicators = $state<Indicators | null>(null);
   let searchHit = $state<{ name: string; currency: string } | null>(null);
   let loading = $state(true);
@@ -122,17 +130,19 @@
     try {
       // Fetch quote + indicators + score in parallel. Also search for the
       // ticker to discover name + currency for the Add modal.
-      const [q, ind, sc, hits] = await Promise.all([
+      const [q, ind, sc, hits, rg] = await Promise.all([
         apiGet('/api/instruments/{ticker}/quote', { params: { path: { ticker: t } } }),
         apiGet('/api/instruments/{ticker}/indicators', {
           params: { path: { ticker: t }, query: { range: r } },
         }),
         apiGet('/api/instruments/{ticker}/score', { params: { path: { ticker: t } } }),
         apiGet('/api/instruments/search', { params: { query: { q: t } } }).catch(() => []),
+        apiGet('/api/regime').catch(() => null),
       ]);
       quote = q as Quote;
       indicators = ind as Indicators;
       score = sc as Score;
+      regime = rg as any;
       const exact = ((hits as any[]) ?? []).find(
         (h: any) => (h.symbol ?? '').toUpperCase() === t,
       );
@@ -381,6 +391,27 @@
     if (v <= -0.35) return 'text-red-600';
     return 'text-slate-600';
   }
+
+  function regimeBadge(label: string | undefined | null): string {
+    if (label === 'calm') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    if (label === 'crisis') return 'bg-red-100 text-red-700 border-red-200';
+    if (label === 'volatile') return 'bg-amber-100 text-amber-700 border-amber-200';
+    return 'bg-slate-100 text-slate-500 border-slate-200';
+  }
+
+  // Factor mode exposes the f_* decomposition; legacy mode does not.
+  let isFactor = $derived(score?.method === 'factor');
+  let factorRows = $derived(
+    score && isFactor
+      ? [
+          { label: 'Momentum (12-1)', v: score.f_momentum },
+          { label: 'Trend quality', v: score.f_trend_quality },
+          { label: 'Low volatility', v: score.f_low_vol },
+          { label: 'Mean-reversion', v: score.f_mean_reversion },
+          { label: 'Short reversal', v: score.f_short_reversal },
+        ]
+      : [],
+  );
 </script>
 
 <div class="space-y-4">
@@ -462,49 +493,78 @@
 
     <!-- Score breakdown card -->
     {#if score}
-      <section
-        class="bg-white border border-slate-200 rounded-xl shadow-sm p-4 grid grid-cols-3 md:grid-cols-6 gap-4 text-sm"
-      >
-        <div class="flex flex-col">
-          <span class="text-xs uppercase text-slate-500 tracking-wide">Signal</span>
-          <span
-            class="mt-1 inline-flex items-center px-3 py-1 rounded-md border text-base font-semibold w-fit {recoColor(score.signal)}"
-          >
-            {score.signal ?? '–'}
-          </span>
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-4 space-y-4">
+        <!-- Header: stance + composite + regime chip -->
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div class="flex flex-col">
+            <span class="text-xs uppercase text-slate-500 tracking-wide">Signal</span>
+            <span
+              class="mt-1 inline-flex items-center px-3 py-1 rounded-md border text-base font-semibold w-fit {recoColor(score.signal)}"
+            >{score.signal ?? '–'}</span>
+          </div>
+          <div class="flex flex-col">
+            <span class="text-xs uppercase text-slate-500 tracking-wide">Composite</span>
+            <span class="mt-1 text-xl font-mono font-semibold {signalColor(score.score)}">
+              {fmtNum(score.score, 2)}
+            </span>
+          </div>
+          <div class="flex flex-col">
+            <span class="text-xs uppercase text-slate-500 tracking-wide">Method</span>
+            <span class="mt-1 text-sm font-medium text-slate-700 capitalize">{score.method ?? 'factor'}</span>
+          </div>
+          {#if regime?.label}
+            <div class="flex flex-col">
+              <span class="text-xs uppercase text-slate-500 tracking-wide">Market regime</span>
+              <span
+                class="mt-1 inline-flex items-center px-2.5 py-1 rounded-md border text-sm font-medium w-fit capitalize {regimeBadge(regime.label)}"
+                title="From a Gaussian HMM on the benchmark; tilts the factor weights."
+              >{regime.label}{#if regime.confidence != null} · {(regime.confidence * 100).toFixed(0)}%{/if}</span>
+            </div>
+          {/if}
+          {#if score.beta != null}
+            <div class="flex flex-col">
+              <span class="text-xs uppercase text-slate-500 tracking-wide">Beta</span>
+              <span class="mt-1 text-lg font-mono text-slate-700">{fmtNum(score.beta, 2)}</span>
+            </div>
+          {/if}
         </div>
-        <div class="flex flex-col">
-          <span class="text-xs uppercase text-slate-500 tracking-wide">Composite</span>
-          <span class="mt-1 text-xl font-mono font-semibold {signalColor(score.score)}">
-            {fmtNum(score.score, 2)}
-          </span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-xs uppercase text-slate-500 tracking-wide">Trend</span>
-          <span class="mt-1 text-lg font-mono {signalColor(score.trend)}">
-            {fmtNum(score.trend, 2)}
-          </span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-xs uppercase text-slate-500 tracking-wide">Momentum (RSI)</span>
-          <span class="mt-1 text-lg font-mono {signalColor(score.momentum)}">
-            {fmtNum(score.momentum, 2)}
-          </span>
-          <span class="text-xs text-slate-500">RSI 14: {fmtNum(score.rsi_14, 1)}</span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-xs uppercase text-slate-500 tracking-wide">MACD</span>
-          <span class="mt-1 text-lg font-mono {signalColor(score.macd)}">
-            {fmtNum(score.macd, 2)}
-          </span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-xs uppercase text-slate-500 tracking-wide">Mean-reversion</span>
-          <span class="mt-1 text-lg font-mono {signalColor(score.mean_reversion)}">
-            {fmtNum(score.mean_reversion, 2)}
-          </span>
-          <span class="text-xs text-slate-500">z20: {fmtNum(score.zscore_20, 2)}</span>
-        </div>
+
+        <!-- Factor / sub-signal decomposition -->
+        {#if isFactor}
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 border-t border-slate-100 pt-3">
+            {#each factorRows as f (f.label)}
+              <div class="flex flex-col">
+                <span class="text-xs uppercase text-slate-500 tracking-wide">{f.label}</span>
+                <span class="mt-1 text-lg font-mono {signalColor(f.v)}">{fmtNum(f.v, 2)}</span>
+              </div>
+            {/each}
+          </div>
+          <p class="text-xs text-slate-500">
+            Price-only factor model, each score in [-1, +1], blended (regime-weighted)
+            into the composite. Momentum is the 12-month return skipping the last month.
+          </p>
+        {:else}
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 border-t border-slate-100 pt-3">
+            <div class="flex flex-col">
+              <span class="text-xs uppercase text-slate-500 tracking-wide">Trend</span>
+              <span class="mt-1 text-lg font-mono {signalColor(score.trend)}">{fmtNum(score.trend, 2)}</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-xs uppercase text-slate-500 tracking-wide">Momentum (RSI)</span>
+              <span class="mt-1 text-lg font-mono {signalColor(score.momentum)}">{fmtNum(score.momentum, 2)}</span>
+              <span class="text-xs text-slate-500">RSI 14: {fmtNum(score.rsi_14, 1)}</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-xs uppercase text-slate-500 tracking-wide">MACD</span>
+              <span class="mt-1 text-lg font-mono {signalColor(score.macd)}">{fmtNum(score.macd, 2)}</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-xs uppercase text-slate-500 tracking-wide">Mean-reversion</span>
+              <span class="mt-1 text-lg font-mono {signalColor(score.mean_reversion)}">{fmtNum(score.mean_reversion, 2)}</span>
+              <span class="text-xs text-slate-500">z20: {fmtNum(score.zscore_20, 2)}</span>
+            </div>
+          </div>
+        {/if}
       </section>
     {/if}
 

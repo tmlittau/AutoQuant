@@ -407,6 +407,13 @@
     if (s === 'TRIM') return 'bg-red-100 text-red-700 border-red-200';
     return 'bg-slate-100 text-slate-600 border-slate-200';
   }
+
+  function regimeBadge(label: string | null | undefined) {
+    if (label === 'calm') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    if (label === 'crisis') return 'bg-red-100 text-red-700 border-red-200';
+    if (label === 'volatile') return 'bg-amber-100 text-amber-700 border-amber-200';
+    return 'bg-slate-100 text-slate-500 border-slate-200';
+  }
 </script>
 
 <div class="space-y-4">
@@ -508,11 +515,17 @@
     <!-- Signal map (stocks only) -->
     {#if assetClass === 'stocks'}
       <section class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-        <div class="flex items-baseline justify-between mb-2">
+        <div class="flex items-baseline justify-between mb-2 gap-2 flex-wrap">
           <h2 class="text-sm font-semibold text-slate-700">
             BUY / HOLD / TRIM · trend &amp; momentum vs mean-reversion
           </h2>
           <div class="flex items-center gap-2">
+            {#if signals?.regime?.label && signals.regime.label !== 'unknown'}
+              <span
+                class="text-xs px-2 py-0.5 rounded border capitalize {regimeBadge(signals.regime.label)}"
+                title="Current market regime (HMM on the benchmark) — it tilts the factor weights."
+              >regime: {signals.regime.label}</span>
+            {/if}
             {#if signals?.cached}
               <span
                 class="text-xs px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200"
