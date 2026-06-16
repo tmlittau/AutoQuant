@@ -217,6 +217,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/optimize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Optimize Portfolio
+         * @description Suggest target weights for ``asset_class`` and the trades to get there.
+         *
+         *     Runs the chosen optimiser (HRP / min-variance / max-Sharpe / mean-CVaR /
+         *     Black-Litterman) on the Ledoit-Wolf shrunk covariance of the deep-history
+         *     EUR returns, then computes a concrete buy/trim plan vs. the current
+         *     allocation + the efficient frontier for the chart. Advisory only.
+         */
+        post: operations["portfolio_app_api_optimize_portfolio"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/regime": {
         parameters: {
             query?: never;
@@ -1090,6 +1115,115 @@ export interface components {
              */
             lookback_days: number;
         };
+        /** FrontierPointOut */
+        FrontierPointOut: {
+            /** Volatility */
+            volatility: number;
+            /** Ret */
+            ret: number;
+        };
+        /** OptimizeOut */
+        OptimizeOut: {
+            /** Asset Class */
+            asset_class: string;
+            /** Method */
+            method: string;
+            /** Portfolio Value */
+            portfolio_value: number;
+            /** Weights */
+            weights: components["schemas"]["WeightOut"][];
+            /** Trades */
+            trades: components["schemas"]["RebalanceTradeOut"][];
+            /** Turnover */
+            turnover?: number | null;
+            /** Est Cost Eur */
+            est_cost_eur?: number | null;
+            /**
+             * Frontier Volatility
+             * @default []
+             */
+            frontier_volatility: number[];
+            /**
+             * Frontier Return
+             * @default []
+             */
+            frontier_return: number[];
+            min_var_point?: components["schemas"]["FrontierPointOut"] | null;
+            max_sharpe_point?: components["schemas"]["FrontierPointOut"] | null;
+            current_point?: components["schemas"]["FrontierPointOut"] | null;
+            target_point?: components["schemas"]["FrontierPointOut"] | null;
+            /**
+             * Cached
+             * @default false
+             */
+            cached: boolean;
+        };
+        /** RebalanceTradeOut */
+        RebalanceTradeOut: {
+            /** Ticker */
+            ticker: string;
+            /** Current Weight */
+            current_weight: number;
+            /** Target Weight */
+            target_weight: number;
+            /** Delta Weight */
+            delta_weight: number;
+            /** Trade Eur */
+            trade_eur: number;
+        };
+        /** WeightOut */
+        WeightOut: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Current Weight
+             * @default 0
+             */
+            current_weight: number;
+            /**
+             * Target Weight
+             * @default 0
+             */
+            target_weight: number;
+        };
+        /** OptimizeRequest */
+        OptimizeRequest: {
+            /**
+             * Asset Class
+             * @default stocks
+             */
+            asset_class: string;
+            /**
+             * Method
+             * @default hrp
+             */
+            method: string;
+            /**
+             * Min Weight
+             * @default 0
+             */
+            min_weight: number;
+            /**
+             * Max Weight
+             * @default 1
+             */
+            max_weight: number;
+            /**
+             * Lookback Days
+             * @default 756
+             */
+            lookback_days: number;
+            /**
+             * Cost Bps
+             * @default 10
+             */
+            cost_bps: number;
+            /**
+             * Use Factor Views
+             * @default true
+             */
+            use_factor_views: boolean;
+        };
         /** RegimeOut */
         RegimeOut: {
             /** Label */
@@ -1942,6 +2076,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BacktestOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    portfolio_app_api_optimize_portfolio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptimizeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptimizeOut"];
                 };
             };
             /** @description Bad Request */

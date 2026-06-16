@@ -11,6 +11,7 @@
   import Diversification from './routes/Diversification.svelte';
   import Risk from './routes/Risk.svelte';
   import StrategyLab from './routes/StrategyLab.svelte';
+  import Optimizer from './routes/Optimizer.svelte';
   import Stock from './routes/Stock.svelte';
   import Transactions from './routes/Transactions.svelte';
   import Settings from './routes/Settings.svelte';
@@ -25,6 +26,7 @@
     '/portfolio/diversification': Diversification,
     '/portfolio/risk': Risk,
     '/strategy-lab': StrategyLab,
+    '/optimizer': Optimizer,
     '/watchlist': Watchlist,
     '/transactions': Transactions,
     '/stock/:ticker': Stock,

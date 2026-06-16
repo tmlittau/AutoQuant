@@ -119,6 +119,29 @@ STRATEGIES: dict[str, dict] = {
 }
 
 
+def _optimizer_strategy(method: str):
+    """Build a backtest weight_fn that runs an R4 optimiser on the trailing
+    return window at each rebalance (walk-forward)."""
+    def _fn(hist: pd.DataFrame, cols: list, ctx: dict) -> pd.Series:
+        from . import optimize
+
+        if len(hist) < 60:
+            return _equal_weight(hist, cols, ctx)
+        w = optimize.optimize(method, hist[cols])
+        return w.reindex(cols).fillna(0.0) if not w.empty else _equal_weight(hist, cols, ctx)
+    return _fn
+
+
+# Register the R4 optimisers as backtestable strategies (HRP / min-var / CVaR).
+# Black-Litterman needs current factor views + caps, so it stays optimise-only.
+for _key, _label in (
+    ("hrp", "HRP (Hierarchical Risk Parity)"),
+    ("min_variance", "Minimum variance (shrunk covariance)"),
+    ("cvar", "Min-CVaR (tail-risk aware)"),
+):
+    STRATEGIES[_key] = {"fn": _optimizer_strategy(_key), "rebalance": "M", "label": _label}
+
+
 def register_strategy(key: str, fn: WeightFn, *, rebalance: str = "M", label: str = "") -> None:
     """Register a strategy so the backtester + Strategy Lab pick it up.
 

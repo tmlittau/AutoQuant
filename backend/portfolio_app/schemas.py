@@ -561,6 +561,55 @@ class BacktestOut(Schema):
 
 
 # --------------------------------------------------------------------------- #
+# Optimizer + rebalancing (Phase R4)
+# --------------------------------------------------------------------------- #
+class OptimizeRequest(Schema):
+    asset_class: str = "stocks"
+    method: str = "hrp"                  # hrp | min_variance | max_sharpe | cvar | black_litterman
+    min_weight: float = 0.0
+    max_weight: float = 1.0
+    lookback_days: int = 756
+    cost_bps: float = 10.0
+    use_factor_views: bool = True        # black_litterman: use R3 factor scores as views
+
+
+class WeightOut(Schema):
+    ticker: str
+    current_weight: float = 0.0
+    target_weight: float = 0.0
+
+
+class RebalanceTradeOut(Schema):
+    ticker: str
+    current_weight: float
+    target_weight: float
+    delta_weight: float
+    trade_eur: float                     # signed: + buy / - trim
+
+
+class FrontierPointOut(Schema):
+    volatility: float
+    ret: float                           # annualised expected return ('return' is reserved)
+
+
+class OptimizeOut(Schema):
+    asset_class: str
+    method: str
+    portfolio_value: float
+    weights: list[WeightOut]             # current vs target, per ticker
+    trades: list[RebalanceTradeOut]
+    turnover: Optional[float] = None
+    est_cost_eur: Optional[float] = None
+    frontier_volatility: list[float] = []
+    frontier_return: list[float] = []
+    min_var_point: Optional[FrontierPointOut] = None
+    max_sharpe_point: Optional[FrontierPointOut] = None
+    current_point: Optional[FrontierPointOut] = None
+    target_point: Optional[FrontierPointOut] = None
+    cached: bool = False
+
+
+# --------------------------------------------------------------------------- #
 # Settings
 # --------------------------------------------------------------------------- #
 class SettingsOut(Schema):

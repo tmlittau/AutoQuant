@@ -30,7 +30,9 @@ from ninja.security import django_auth
 
 import autoquant as aq
 from autoquant import backtest as bt
+from autoquant import factors as fac
 from autoquant import metrics as m
+from autoquant import optimize as opt
 from autoquant import portfolio as pf
 from autoquant import regime as rg
 from autoquant import risk as rk
@@ -68,6 +70,8 @@ from .schemas import (
     InstrumentSearchHit,
     BacktestOut,
     BacktestRequest,
+    OptimizeOut,
+    OptimizeRequest,
     PortfolioPosition,
     PortfolioRiskOut,
     PortfolioSignalsOut,
@@ -719,6 +723,143 @@ def run_backtest(request, body: BacktestRequest):
         "results": results_out,
         "cached": False,
     }
+    cache.set(cache_key, payload, timeout=10 * 60)
+    return payload
+
+
+# ============================================================================ #
+# Portfolio optimizer + rebalancing (Phase R4)
+# ============================================================================ #
+def _frontier_point(weights, mu, cov):
+    """(volatility, annualised return) of a weight vector on the shrunk cov."""
+    cols = [c for c in weights.index if c in cov.columns]
+    if not cols:
+        return None
+    import numpy as np
+
+    w = weights.reindex(cols).fillna(0.0)
+    if w.sum() > 0:
+        w = w / w.sum()
+    v = w.values
+    var = float(v @ cov.loc[cols, cols].values @ v)
+    ret = float((w * mu.reindex(cols)).sum())
+    return {"volatility": float(np.sqrt(var)) if var > 0 else 0.0, "ret": ret}
+
+
+@api.post("/optimize", response={200: OptimizeOut, 400: ErrorOut}, tags=["portfolio"])
+def optimize_portfolio(request, body: OptimizeRequest):
+    """Suggest target weights for ``asset_class`` and the trades to get there.
+
+    Runs the chosen optimiser (HRP / min-variance / max-Sharpe / mean-CVaR /
+    Black-Litterman) on the Ledoit-Wolf shrunk covariance of the deep-history
+    EUR returns, then computes a concrete buy/trim plan vs. the current
+    allocation + the efficient frontier for the chart. Advisory only.
+    """
+    asset_class = (body.asset_class or "stocks").lower()
+    if asset_class not in VALID_ASSET_CLASSES:
+        return 400, {"detail": f"asset_class must be one of {VALID_ASSET_CLASSES}"}
+    method = body.method if body.method in opt.METHODS else "hrp"
+    min_w = max(0.0, min(float(body.min_weight), 1.0))
+    max_w = max(min_w + 1e-6, min(float(body.max_weight), 1.0))
+    lookback = max(126, min(int(body.lookback_days), 2520))
+    cost_bps = max(0.0, min(float(body.cost_bps), 200.0))
+
+    reg = get_registry()
+    adapter = reg.adapter
+    cache_key = (
+        f"optimize:{reg.name}:{asset_class}:{method}:{min_w}:{max_w}:"
+        f"{lookback}:{cost_bps}:{int(body.use_factor_views)}:{_tx_revision()}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    portfolio = _portfolio_dict()
+    if not pf.all_tickers(portfolio, asset_class):
+        return 400, {"detail": f"no {asset_class} holdings to optimise"}
+
+    prices = rk.eur_price_matrix(
+        adapter, portfolio, asset_class, lookback_days=lookback, full_history=True
+    )
+    rets = rk.returns_matrix(prices)
+    if rets.shape[1] < 2 or rets.shape[0] < 60:
+        return 400, {"detail": "need >=2 holdings and enough history to optimise"}
+
+    # Current allocation weights + total value.
+    tx_df = repo.build_transactions_df()
+    positions = pf.current_positions(tx_df, portfolio, asset_class=asset_class)
+    current_w = {}
+    portfolio_value = 0.0
+    if not positions.empty:
+        prices_local = pf.latest_prices_local(adapter, list(positions.index))
+        ccy_map = pf.ticker_to_currency(portfolio, asset_class)
+        fx_rates = pf.fx_rates_for(adapter, ccy_map.values())
+        valued = pf.value_positions(positions, prices_local, ccy_map, fx_rates)
+        portfolio_value = float(valued["value_eur"].sum())
+        current_w = {t: float(w) for t, w in valued["weight"].items() if w > 0}
+    current_series = pd.Series(current_w).reindex(rets.columns).fillna(0.0)
+
+    # Black-Litterman views = current per-ticker factor composites.
+    kwargs = {"min_weight": min_w, "max_weight": max_w}
+    if method == "black_litterman" and body.use_factor_views:
+        views = {}
+        for t in rets.columns:
+            try:
+                views[t] = float(fac.factor_score_series(prices[t].dropna())["score"])
+            except Exception:
+                views[t] = 0.0
+        kwargs["views"] = views
+
+    target = opt.optimize(method, rets, **kwargs)
+
+    plan = opt.rebalance_plan(
+        current_series, target, portfolio_value or 1.0, cost_bps=cost_bps
+    )
+    frontier = opt.efficient_frontier(rets)
+    cov = rk.shrunk_covariance(rets)
+    mu = rets.mean() * 252
+
+    weights_out = [
+        {
+            "ticker": t,
+            "current_weight": float(current_series.get(t, 0.0)),
+            "target_weight": float(target.get(t, 0.0)),
+        }
+        for t in rets.columns
+    ]
+
+    payload = {
+        "asset_class": asset_class,
+        "method": method,
+        "portfolio_value": portfolio_value,
+        "weights": weights_out,
+        "trades": [
+            {
+                "ticker": tr["ticker"],
+                "current_weight": tr["current_weight"],
+                "target_weight": tr["target_weight"],
+                "delta_weight": tr["delta_weight"],
+                "trade_eur": tr["trade_eur"],
+            }
+            for tr in plan["trades"]
+        ],
+        "turnover": ser.safe_float(plan["turnover"]),
+        "est_cost_eur": ser.safe_float(plan["est_cost_eur"]),
+        "frontier_volatility": [float(v) for v in frontier["volatility"]],
+        "frontier_return": [float(r) for r in frontier["return"]],
+        "min_var_point": (
+            {"volatility": frontier["min_var"]["volatility"], "ret": frontier["min_var"]["return"]}
+            if frontier.get("min_var") else None
+        ),
+        "max_sharpe_point": (
+            {"volatility": frontier["max_sharpe"]["volatility"], "ret": frontier["max_sharpe"]["return"]}
+            if frontier.get("max_sharpe") else None
+        ),
+        "current_point": _frontier_point(current_series, mu, cov) if current_series.sum() > 0 else None,
+        "target_point": _frontier_point(target, mu, cov),
+        "cached": False,
+    }
+    audit(request, "/optimize", "POST", {"method": method, "asset_class": asset_class})
     cache.set(cache_key, payload, timeout=10 * 60)
     return payload
 

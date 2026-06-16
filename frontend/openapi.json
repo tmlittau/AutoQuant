@@ -428,6 +428,54 @@
         ]
       }
     },
+    "/api/optimize": {
+      "post": {
+        "operationId": "portfolio_app_api_optimize_portfolio",
+        "summary": "Optimize Portfolio",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizeOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "description": "Suggest target weights for ``asset_class`` and the trades to get there.\n\nRuns the chosen optimiser (HRP / min-variance / max-Sharpe / mean-CVaR /\nBlack-Litterman) on the Ledoit-Wolf shrunk covariance of the deep-history\nEUR returns, then computes a concrete buy/trim plan vs. the current\nallocation + the efficient frontier for the chart. Advisory only.",
+        "tags": [
+          "portfolio"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "SessionAuth": []
+          }
+        ]
+      }
+    },
     "/api/regime": {
       "get": {
         "operationId": "portfolio_app_api_get_regime",
@@ -2954,6 +3002,243 @@
           }
         },
         "title": "BacktestRequest",
+        "type": "object"
+      },
+      "FrontierPointOut": {
+        "properties": {
+          "volatility": {
+            "title": "Volatility",
+            "type": "number"
+          },
+          "ret": {
+            "title": "Ret",
+            "type": "number"
+          }
+        },
+        "required": [
+          "volatility",
+          "ret"
+        ],
+        "title": "FrontierPointOut",
+        "type": "object"
+      },
+      "OptimizeOut": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "portfolio_value": {
+            "title": "Portfolio Value",
+            "type": "number"
+          },
+          "weights": {
+            "items": {
+              "$ref": "#/components/schemas/WeightOut"
+            },
+            "title": "Weights",
+            "type": "array"
+          },
+          "trades": {
+            "items": {
+              "$ref": "#/components/schemas/RebalanceTradeOut"
+            },
+            "title": "Trades",
+            "type": "array"
+          },
+          "turnover": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnover"
+          },
+          "est_cost_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Eur"
+          },
+          "frontier_volatility": {
+            "default": [],
+            "items": {
+              "type": "number"
+            },
+            "title": "Frontier Volatility",
+            "type": "array"
+          },
+          "frontier_return": {
+            "default": [],
+            "items": {
+              "type": "number"
+            },
+            "title": "Frontier Return",
+            "type": "array"
+          },
+          "min_var_point": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrontierPointOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_sharpe_point": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrontierPointOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_point": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrontierPointOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_point": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FrontierPointOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asset_class",
+          "method",
+          "portfolio_value",
+          "weights",
+          "trades"
+        ],
+        "title": "OptimizeOut",
+        "type": "object"
+      },
+      "RebalanceTradeOut": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "current_weight": {
+            "title": "Current Weight",
+            "type": "number"
+          },
+          "target_weight": {
+            "title": "Target Weight",
+            "type": "number"
+          },
+          "delta_weight": {
+            "title": "Delta Weight",
+            "type": "number"
+          },
+          "trade_eur": {
+            "title": "Trade Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker",
+          "current_weight",
+          "target_weight",
+          "delta_weight",
+          "trade_eur"
+        ],
+        "title": "RebalanceTradeOut",
+        "type": "object"
+      },
+      "WeightOut": {
+        "properties": {
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "current_weight": {
+            "default": 0.0,
+            "title": "Current Weight",
+            "type": "number"
+          },
+          "target_weight": {
+            "default": 0.0,
+            "title": "Target Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker"
+        ],
+        "title": "WeightOut",
+        "type": "object"
+      },
+      "OptimizeRequest": {
+        "properties": {
+          "asset_class": {
+            "default": "stocks",
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "method": {
+            "default": "hrp",
+            "title": "Method",
+            "type": "string"
+          },
+          "min_weight": {
+            "default": 0.0,
+            "title": "Min Weight",
+            "type": "number"
+          },
+          "max_weight": {
+            "default": 1.0,
+            "title": "Max Weight",
+            "type": "number"
+          },
+          "lookback_days": {
+            "default": 756,
+            "title": "Lookback Days",
+            "type": "integer"
+          },
+          "cost_bps": {
+            "default": 10.0,
+            "title": "Cost Bps",
+            "type": "number"
+          },
+          "use_factor_views": {
+            "default": true,
+            "title": "Use Factor Views",
+            "type": "boolean"
+          }
+        },
+        "title": "OptimizeRequest",
         "type": "object"
       },
       "RegimeOut": {

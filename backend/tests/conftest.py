@@ -106,10 +106,14 @@ def stub_adapter(monkeypatch):
         def get_fx_daily(self, frm, to, outputsize="compact"):
             import pandas as pd
 
-            idx = pd.bdate_range("2026-04-01", periods=60)
+            # Span a wide window (2022-2027) so it overlaps both the compact
+            # (~2026) and deep-history (2023+) price windows when converting
+            # to EUR; otherwise the FX reindex would be all-NaN.
+            n = 1500
+            idx = pd.bdate_range("2022-01-03", periods=n)
             return pd.DataFrame(
-                {"open": [0.86] * 60, "high": [0.87] * 60,
-                 "low": [0.85] * 60, "close": [0.86] * 60},
+                {"open": [0.86] * n, "high": [0.87] * n,
+                 "low": [0.85] * n, "close": [0.86] * n},
                 index=idx,
             )
 
@@ -122,6 +126,24 @@ def stub_adapter(monkeypatch):
                 {t: [100.0 + i * 0.1 for i in range(60)] for t in tickers},
                 index=idx,
             )
+            df.index.name = "date"
+            return df
+
+        def get_close_history(self, tickers):
+            # Deep (3y) history with per-ticker drift + noise so covariance is
+            # non-singular -- lets the optimizer/backtest endpoints produce
+            # meaningful (non-degenerate) weights in tests.
+            import numpy as np
+            import pandas as pd
+
+            tickers = list(tickers)
+            idx = pd.bdate_range("2023-01-02", periods=750)
+            out = {}
+            for j, t in enumerate(tickers):
+                rng = np.random.default_rng(abs(hash(t)) % (2**32))
+                rets = rng.normal(0.0003 + 0.0001 * j, 0.012, 750)
+                out[t] = 100.0 * np.exp(np.cumsum(rets))
+            df = pd.DataFrame(out, index=idx)
             df.index.name = "date"
             return df
 
